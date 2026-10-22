@@ -14,7 +14,10 @@ app = FastAPI()
 # Permet à votre site local de communiquer avec votre API
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # En local c'est ok. En prod, on mettrait l'URL exacte du site.
+    allow_origins=[
+    "http://127.0.0.1:5500",
+    "http://localhost:5500"
+],  # En local c'est ok. En prod, on mettrait l'URL exacte du site.
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
