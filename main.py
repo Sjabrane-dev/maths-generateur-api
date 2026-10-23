@@ -15,10 +15,10 @@ app = FastAPI()
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-    "http://127.0.0.1:5500",
-    "http://localhost:5500",
-    "https://maths-brel.netlify.app"  # <-- L'adresse corrigée
-],  # En local c'est ok. En prod, on mettrait l'URL exacte du site.
+        "http://127.0.0.1:5500",
+        "http://localhost:5500",
+        "https://maths-brel.netlify.app"
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -26,6 +26,9 @@ app.add_middleware(
 
 class DemandeFiche(BaseModel):
     exercices: list[str]
+    titre: str = "Feuille d'exercices"
+    classe: str = ""
+    etablissement: str = ""
 
 # --- ROUTE 1 : Liste de tous les exercices ---
 @app.get("/exercices")
@@ -52,12 +55,12 @@ async def liste_exercices():
         }
         for r in resultats
     ]
+
 # --- ROUTE 2 : Liste des chapitres pour un niveau donné ---
 @app.get("/chapitres/{niveau}")
 async def liste_chapitres(niveau: str):
     conn = sqlite3.connect("banque.db")
     cursor = conn.cursor()
-    # On ordonne par le numéro du chapitre pour respecter votre progression
     cursor.execute("SELECT numero, titre FROM chapitres WHERE classe = ? ORDER BY numero", (niveau,))
     resultats = cursor.fetchall()
     conn.close()
@@ -74,14 +77,22 @@ async def api_generer_pdf(demande: DemandeFiche):
         raise HTTPException(status_code=400, detail="La liste d'exercices est vide.")
     
     try:
-        assembler_et_compiler(demande.exercices)
+        # On passe les 4 arguments à la fonction de compilation
+        assembler_et_compiler(
+            liste_choix=demande.exercices,
+            titre_personnalise=demande.titre,
+            classe_personnalisee=demande.classe,
+            etablissement=demande.etablissement
+        )
+        
         chemin_pdf = "feuille_exercices.pdf"
         
         if os.path.exists(chemin_pdf):
+            nom_fichier_propre = demande.titre.replace(" ", "_").replace("'", "") + ".pdf"
             return FileResponse(
                 chemin_pdf, 
                 media_type="application/pdf", 
-                filename="votre_fiche.pdf"
+                filename=nom_fichier_propre
             )
         else:
             raise HTTPException(status_code=500, detail="Le PDF n'a pas pu être généré.")

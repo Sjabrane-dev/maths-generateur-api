@@ -3,6 +3,7 @@ import os
 import subprocess
 import sqlite3
 import glob
+from datetime import datetime
 
 PREAMBULE = r"""\documentclass[11pt,a4paper]{article}
 \usepackage[utf8]{inputenc}
@@ -29,13 +30,6 @@ PREAMBULE = r"""\documentclass[11pt,a4paper]{article}
 }
 
 \begin{document}
-% --- Titre simplifié pour éviter les erreurs LaTeX ---
-\begin{center}
-    {\LARGE \textbf{Feuille d'exercices}} \\[0.5cm]
-    {\large Généré automatiquement} \\[0.5cm]
-\end{center}
-\hrule
-\vspace{0.5cm}
 """
 
 FOOTER = r"""
@@ -51,13 +45,36 @@ def recuperer_exercice(id_exo):
     conn.close()
     return resultat
 
+def assembler_et_compiler(liste_choix, titre_personnalise="Feuille d'exercices", classe_personnalisee="", etablissement=""):
+    # 1. Échappement des caractères spéciaux LaTeX
+    titre_propre = titre_personnalise.replace('&', '\\&').replace('%', '\\%').replace('#', '\\#').replace('_', '\\_')
+    classe_propre = classe_personnalisee.replace('&', '\\&').replace('%', '\\%').replace('#', '\\#').replace('_', '\\_')
+    etab_propre = etablissement.replace('&', '\\&').replace('%', '\\%').replace('#', '\\#').replace('_', '\\_')
+    
+    date_du_jour = datetime.now().strftime("%d/%m/%Y")
+    
+    # 2. Construction de l'en-tête
+    entete_latex = ""
+    
+    # Établissement en haut à droite (seulement s'il est rempli)
+    if etab_propre:
+        entete_latex += r"\begin{flushright}\textsc{" + etab_propre + r"}\end{flushright}" + "\n"
 
-def assembler_et_compiler(liste_choix):
-    code_final = PREAMBULE
+    # Titre, Date et Classe au centre
+    entete_latex += r"""
+\begin{center}
+    {\LARGE \textbf{""" + titre_propre + r"""}} \\[0.4cm]
+    {\large """ + date_du_jour + ((" -- " + classe_propre) if classe_propre else "") + r"""} \\[0.5cm]
+\end{center}
+\hrule
+\vspace{0.5cm}
+"""
+    
+    code_final = PREAMBULE + entete_latex
 
+    # 3. Ajout des exercices
     for identifiant in liste_choix:
         donnees_exo = recuperer_exercice(identifiant)
-
         if donnees_exo:
             titre, niveau, enonce = donnees_exo
             code_final += f"\\begin{{exercice}}{{{titre} ({niveau})}}\n"
@@ -68,6 +85,7 @@ def assembler_et_compiler(liste_choix):
 
     code_final += FOOTER
 
+    # 4. Écriture du fichier .tex et compilation
     nom_fichier_tex = "feuille_exercices.tex"
     with open(nom_fichier_tex, "w", encoding="utf-8") as f:
         f.write(code_final)
@@ -84,22 +102,18 @@ def assembler_et_compiler(liste_choix):
         print("❌ ERREUR LATEX :")
         print(resultat.stdout)
         print(resultat.stderr)
-        # Nettoyage même en cas d'échec pour ne pas bloquer le dossier
         nettoyer_fichiers_temporaires()
         raise Exception("La compilation LaTeX a échoué")
 
-    # --- NETTOYAGE AUTOMATIQUE DU CACHE ET DES FICHIERS TEMPORAIRES ---
     nettoyer_fichiers_temporaires()
-    print("🎉 Succès ! Le fichier 'feuille_exercices.pdf' est prêt et le dossier est propre.")
+    print(f"🎉 Succès ! Le fichier 'feuille_exercices.pdf' est prêt.")
 
 
 def nettoyer_fichiers_temporaires():
     """Supprime tous les fichiers auxiliaires générés par la compilation LaTeX."""
-    # Extensions de fichiers temporaires LaTeX à balayer
     extensions_cache = ["*.aux", "*.log", "*.toc", "*.synctex.gz", "feuille_exercices.tex"]
     
     for motif in extensions_cache:
-        # Recherche tous les fichiers correspondants dans le dossier courant
         fichiers_trouves = glob.glob(motif)
         for fichier in fichiers_trouves:
             try:
