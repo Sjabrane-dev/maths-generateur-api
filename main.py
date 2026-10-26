@@ -1,104 +1,97 @@
-# Fichier : main.py
+# Fichier : API_RENDER/main.py
+import os
+import shutil
+import sqlite3
+from contextlib import closing
+
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
-from pydantic import BaseModel
-import os
-import sqlite3
+from pydantic import BaseModel, Field
+from starlette.background import BackgroundTask
 
-# On importe la fonction de compilation depuis votre autre fichier
-from generateur import assembler_et_compiler
+from generateur import assembler_et_compiler, ErreurGeneration, MAX_EXERCICES
+from config import CHEMIN_BASE
 
 app = FastAPI()
 
-# Permet à votre site local de communiquer avec votre API
+# Sur Render, définir la variable d'environnement ORIGINES_AUTORISEES avec
+# l'adresse de votre site, par ex. : https://mon-site.fr
+# (plusieurs adresses possibles, séparées par des virgules).
+ORIGINES = [o.strip() for o in os.environ.get("ORIGINES_AUTORISEES", "*").split(",") if o.strip()]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://127.0.0.1:5500",
-        "http://localhost:5500",
-        "https://maths-brel.netlify.app"
-    ],
-    allow_credentials=True,
-    allow_methods=["*"],
+    allow_origins=ORIGINES,
+    allow_credentials=False,
+    allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
 
-class DemandeFiche(BaseModel):
-    exercices: list[str]
-    titre: str = "Feuille d'exercices"
-    classe: str = ""
-    etablissement: str = ""
 
-# --- ROUTE 1 : Liste de tous les exercices ---
+class DemandeFiche(BaseModel):
+    exercices: list[str] = Field(min_length=1, max_length=MAX_EXERCICES)
+    titre: str | None = Field(default="Feuille d'exercices", max_length=120)
+    classe: str | None = Field(default="", max_length=60)
+    etablissement: str | None = Field(default="", max_length=120)
+
+
+@app.get("/")
+def accueil():
+    return {"statut": "ok"}
+
+
+# Fonctions « def » (et non « async def ») : FastAPI les exécute dans un fil
+# séparé, donc une compilation LaTeX ne bloque plus tout le serveur.
 @app.get("/exercices")
-async def liste_exercices():
-    conn = sqlite3.connect("banque.db")
-    cursor = conn.cursor()
-    cursor.execute("""
-        SELECT id, titre, niveau, chapitre, difficulte, enonce, correction 
-        FROM exercices 
-        ORDER BY niveau, chapitre
-    """)
-    resultats = cursor.fetchall()
-    conn.close()
-    
+def liste_exercices():
+    with closing(sqlite3.connect(CHEMIN_BASE)) as conn:
+        resultats = conn.execute("""
+            SELECT id, titre, niveau, chapitre, difficulte, enonce, correction
+            FROM exercices
+            ORDER BY niveau, chapitre, id
+        """).fetchall()
+
     return [
         {
-            "id": r[0],
-            "titre": r[1],
-            "niveau": r[2],
-            "chapitre": r[3],
-            "difficulte": r[4],
-            "enonce": r[5],
-            "correction": r[6]
+            "id": l[0], "titre": l[1], "niveau": l[2], "chapitre": l[3],
+            "difficulte": l[4], "enonce": l[5], "correction": l[6]
         }
-        for r in resultats
+        for l in resultats
     ]
 
-# --- ROUTE 2 : Liste des chapitres pour un niveau donné ---
+
 @app.get("/chapitres/{niveau}")
-async def liste_chapitres(niveau: str):
-    conn = sqlite3.connect("banque.db")
-    cursor = conn.cursor()
-    cursor.execute("SELECT numero, titre FROM chapitres WHERE classe = ? ORDER BY numero", (niveau,))
-    resultats = cursor.fetchall()
-    conn.close()
-    
-    return [
-        {"numero": r[0], "titre": r[1]}
-        for r in resultats
-    ]
+def liste_chapitres(niveau: str):
+    with closing(sqlite3.connect(CHEMIN_BASE)) as conn:
+        resultats = conn.execute(
+            "SELECT numero, titre FROM chapitres WHERE classe = ? ORDER BY numero", (niveau,)
+        ).fetchall()
+    return [{"numero": l[0], "titre": l[1]} for l in resultats]
 
-# --- ROUTE 3 : Générer le PDF ---
+
 @app.post("/generer-pdf")
-async def api_generer_pdf(demande: DemandeFiche):
-    if not demande.exercices:
-        raise HTTPException(status_code=400, detail="La liste d'exercices est vide.")
-    
+def api_generer_pdf(demande: DemandeFiche):
     try:
-        # On passe les 4 arguments à la fonction de compilation
-        assembler_et_compiler(
+        chemin_pdf, dossier = assembler_et_compiler(
             liste_choix=demande.exercices,
-            titre_personnalise=demande.titre,
-            classe_personnalisee=demande.classe,
-            etablissement=demande.etablissement
+            titre_fiche=demande.titre or "",
+            classe_fiche=demande.classe or "",
+            etablissement_fiche=demande.etablissement or "",
         )
-        
-        chemin_pdf = "feuille_exercices.pdf"
-        
-        if os.path.exists(chemin_pdf):
-            nom_fichier_propre = demande.titre.replace(" ", "_").replace("'", "") + ".pdf"
-            return FileResponse(
-                chemin_pdf, 
-                media_type="application/pdf", 
-                filename=nom_fichier_propre
-            )
-        else:
-            raise HTTPException(status_code=500, detail="Le PDF n'a pas pu être généré.")
-            
-    except Exception as e:
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except ErreurGeneration as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+    # le dossier temporaire est supprimé une fois le PDF envoyé
+    return FileResponse(
+        chemin_pdf,
+        media_type="application/pdf",
+        filename="votre_fiche.pdf",
+        background=BackgroundTask(shutil.rmtree, dossier, ignore_errors=True),
+    )
+
 
 if __name__ == "__main__":
     import uvicorn

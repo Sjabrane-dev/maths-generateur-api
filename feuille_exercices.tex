@@ -1,0 +1,101 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[french]{babel}
+\usepackage{amsmath,amsfonts,amssymb,geometry}
+\geometry{hmargin=2cm,vmargin=2cm}
+
+\newcommand{\N}{\mathbb{N}}
+\newcommand{\Z}{\mathbb{Z}}
+\newcommand{\Q}{\mathbb{Q}}
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\D}{\mathbb{D}}
+\newcommand{\C}{\mathbb{C}}
+
+\newcounter{exocount}
+\newenvironment{exercice}[1]{
+    \stepcounter{exocount}
+    \vspace{0.5cm}
+    \noindent\textbf{Exercice \arabic{exocount} -- #1}
+    \par\medskip
+}{
+    \par
+}
+
+\begin{document}
+
+\noindent
+\begin{minipage}[t]{0.5\textwidth}
+    \textbf{LYCÉE POLYVALENT JACQUES BREL} \\
+    Année scolaire 2026-2027
+\end{minipage}
+\begin{minipage}[t]{0.5\textwidth}
+    \raggedleft
+    \textbf{Niveau : Secondaire} \\
+    \textbf{Date : } 25/10/2026
+\end{minipage}
+
+\vspace{0.2cm}
+\noindent\rule{\textwidth}{0.5pt}
+\vspace{0.3cm}
+
+\begin{center}
+    {\LARGE \bfseries Feuille d'exercices}
+\end{center}
+
+\vspace{0.1cm}
+\noindent\rule{\textwidth}{1.5pt}
+\vspace{0.4cm}
+
+\noindent
+\textbf{Nom : } \dots\dots\dots\dots\dots\dots\dots\dots\dots\dots\dots\dots\dots\dots\dots\quad 
+\textbf{Prénom : } \dots\dots\dots\dots\dots\dots\dots\dots\dots\dots\dots\dots\dots\dots\dots
+
+\vspace{0.4cm}
+\begin{exercice}{Simplification de fraction (Seconde)}
+Simplifier la fraction $\dfrac{42}{56}$.
+\end{exercice}
+\begin{exercice}{Appartenance aux ensembles (Seconde)}
+Pour chacun des nombres, indiquer à quel(s) ensemble(s) $\N$, $\Z$, $\D$, $\Q$ et $\R$ il appartient.
+\begin{itemize}
+	\item $a = -5$
+	\item $b = 0{,}4$
+	\item $c = \sqrt{2}$
+	\item $d = \frac{1}{3}$
+	\item $e = \frac{1}{4}$
+	\item $f = 0$
+\end{itemize}
+\end{exercice}
+\begin{exercice}{Plus petit ensemble d'appartenance (Seconde)}
+Pour chacun des nombres suivants, indiquer quel est le plus petit ensemble auquel il appartient.
+\begin{itemize}
+	\item $a = -\frac{7}{2}$
+	\item $b = 8$
+	\item $c = \frac{6}{3}$
+	\item $d = 0{,}3333$
+	\item $e = \frac{1}{7}$
+	\item $f = \frac{1}{8}$
+\end{itemize}
+\end{exercice}
+\begin{exercice}{Affirmations et contre-exemples (Seconde)}
+Pour chacune des affirmations suivantes, indiquer si elle est vraie ou fausse. Dans le cas où elle est fausse, donner un contre-exemple.
+\begin{itemize}
+	\item Si $x \in \N$, alors $2x \in \N$.
+	\item Si $x \in \N$, alors $3x + 1 \in \Z$.
+	\item Si $x \in \N$, alors $\frac{2x - 5}{2} \in \Z$.
+	\item Si $x \in \Z$, alors $\frac{x - 4}{3} \in \D$.
+	\item Si $x \in \Q$, alors $x + \frac{1}{2} \in \R$.
+	\item Si $x \in \N$, alors $\sqrt{x} \in \Q$.
+\end{itemize}
+\end{exercice}
+\begin{exercice}{Réciproques (Seconde)}
+On considère un nombre réel $x$. Pour chacune des affirmations suivantes, indiquer si elle est vraie ou fausse. Indiquer ensuite si sa réciproque est vraie ou fausse.
+\begin{itemize}
+	\item Si $x \in \N$, alors $x \in \Z$.
+	\item Si $x \in \D$, alors $x \in \Q$.
+	\item Si $x \in \N$, alors $2x \in \N$.
+	\item Si $x \in \Z$, alors $-x \in \N$.
+\end{itemize}
+\end{exercice}
+
+\end{document}
