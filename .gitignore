@@ -1,0 +1,7 @@
+.venv/
+__pycache__/
+*.pyc
+*.bak
+*.avant
+banque_sauvegarde.db
+feuille_exercices.*

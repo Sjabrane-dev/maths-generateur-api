@@ -4,7 +4,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     texlive-latex-base \
     texlive-latex-recommended \
     texlive-fonts-recommended \
-    texlive-lang-french \
+    texlive-lang-french texlive-pictures \
     lmodern \
     && rm -rf /var/lib/apt/lists/*
 

@@ -34,6 +34,9 @@ class DemandeFiche(BaseModel):
     titre: str | None = Field(default="Feuille d'exercices", max_length=120)
     classe: str | None = Field(default="", max_length=60)
     etablissement: str | None = Field(default="", max_length=120)
+    duree: str | None = Field(default="", max_length=40)   # facultatif (ex. « 1 h » pour un contrôle)
+    # barème facultatif : {"EXP-012": 4, "EXP-013": 2.5} (points par exercice)
+    points: dict[str, float] | None = None   # (pas de max_length : non géré par pydantic v1)
 
 
 @app.get("/")
@@ -78,6 +81,8 @@ def api_generer_pdf(demande: DemandeFiche):
             titre_fiche=demande.titre or "",
             classe_fiche=demande.classe or "",
             etablissement_fiche=demande.etablissement or "",
+            duree_fiche=demande.duree or "",
+            points=demande.points or {},
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
