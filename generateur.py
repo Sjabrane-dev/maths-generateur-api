@@ -14,41 +14,60 @@ MAX_EXERCICES = 40        # limite par feuille (protège le serveur)
 DELAI_COMPILATION = 60    # secondes maximum pour pdflatex
 
 
+TEXTES_CALCULATRICE = {
+    "autorisee": "Calculatrice autorisée",
+    "interdite": "Calculatrice interdite",
+}
+
+
 class ErreurGeneration(Exception):
     """La compilation LaTeX a échoué (erreur côté serveur)."""
 
 
-PREAMBULE_BASE = r"""\documentclass[11pt,a4paper]{article}
+def generer_preambule(titre_fiche="Feuille d'exercices", lycee="LPO Jacques Brel"):
+    titre_echappe = "".join(
+        {"\\": r"\textbackslash{}", "&": r"\&", "%": r"\%", "$": r"\$",
+         "#": r"\#", "_": r"\_", "{": r"\{", "}": r"\}",
+         "~": r"\textasciitilde{}", "^": r"\textasciicircum{}"}.get(c, c)
+        for c in (titre_fiche or "Feuille d'exercices")
+    )
+    return r"""\documentclass[11pt,a4paper]{article}
 \usepackage[utf8]{inputenc}
 \usepackage[T1]{fontenc}
 \usepackage{lmodern}
 \usepackage[french]{babel}
-\usepackage{amsmath,amsfonts,amssymb,geometry}
-\usepackage{tikz}
-% ===== Ajouts pour la banque « Maths expertes » (à coller avant \begin{document}) =====
+\usepackage{amsmath,amsfonts,amssymb,geometry,fancyhdr}
 \usepackage{tikz,multicol,array,eurosym,xcolor,listings}
 \usetikzlibrary{calc,angles,quotes,positioning,shapes.geometric,arrows.meta}
+
+% ===== Charte graphique du site =====
 \definecolor{col1}{RGB}{12, 102, 98}
+
 \newcommand{\U}{\mathbb{U}}
 \newcommand{\K}{\mathbb{K}}
 \renewcommand{\Re}{\operatorname{Re}}
 \renewcommand{\Im}{\operatorname{Im}}
+
 \tikzset{gr/.style={circle,fill=col1,text=white,minimum size=6.5mm,inner sep=0pt,font=\footnotesize},
   lien/.style={line width=0.6pt},
   fl/.style={->,>=stealth,line width=0.6pt}}
-\newcommand{\MarkovDeuxN}[6]{%
-  \begin{tikzpicture}[baseline=-1mm]
-    \node[gr] (a) at (0,0) {#1};
-    \node[gr] (b) at (3,0) {#2};
-    \draw[fl] (a) to[bend left=30] node[above,font=\small]{#4} (b);
-    \draw[fl] (b) to[bend left=30] node[below,font=\small]{#5} (a);
-    \draw[fl] (a) to[out=150,in=210,looseness=8] node[left,font=\small]{#3} (a);
-    \draw[fl] (b) to[out=30,in=330,looseness=8] node[right,font=\small]{#6} (b);
-  \end{tikzpicture}}
-\newcommand{\MarkovDeux}[4]{\MarkovDeuxN{$A_1$}{$A_2$}{#1}{#2}{#3}{#4}}
+
 \lstset{language=Python,basicstyle=\ttfamily\small,keepspaces=true,showstringspaces=false,columns=fullflexible,
   literate={é}{{\'e}}1 {è}{{\`e}}1 {à}{{\`a}}1 {ê}{{\^e}}1 {ç}{{\c c}}1}
-\geometry{hmargin=2cm,vmargin=2cm}
+
+\geometry{hmargin=2cm,vmargin=2.5cm}
+
+% ===== En-têtes et pieds de page =====
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\small \textcolor{col1}{\textbf{Mathématiques}}}
+\fancyhead[R]{\small \textcolor{col1}{\textbf{""" + titre_echappe + r"""}}}
+\fancyfoot[L]{\small """ + echapper_latex(lycee) + r"""}
+\fancyfoot[R]{\small Page \thepage}
+\renewcommand{\headrulewidth}{0.6pt}
+\renewcommand{\footrulewidth}{0.4pt}
+% Première page : sans en-tête (le titre est déjà en grand), même pied de page
+\fancypagestyle{premiere}{\fancyhead{}\renewcommand{\headrulewidth}{0pt}}
 
 \newcommand{\N}{\mathbb{N}}
 \newcommand{\Z}{\mathbb{Z}}
@@ -60,9 +79,9 @@ PREAMBULE_BASE = r"""\documentclass[11pt,a4paper]{article}
 \newcounter{exocount}
 \newenvironment{exercice}[2][]{
     \stepcounter{exocount}
-    \vspace{0.5cm}
-    \noindent\textbf{Exercice \arabic{exocount}#1 -- #2}
-    \par\medskip
+    \vspace{0.4cm}
+    \noindent{\color{col1}\textbf{Exercice \arabic{exocount}#1}} \textbf{-- #2}
+    \par\vspace{0.1cm}
 }{
     \par
 }
@@ -75,9 +94,7 @@ FOOTER = r"""
 """
 
 # ---------------------------------------------------------------------------
-# Protection du LaTeX : tout texte venant de l'extérieur (titre, classe,
-# établissement) est « échappé » pour ne pas casser la compilation
-# (ni permettre d'injecter des commandes LaTeX).
+# Protection du LaTeX : tout texte venant de l'extérieur est « échappé »
 # ---------------------------------------------------------------------------
 _SPECIAUX = {
     "\\": r"\textbackslash{}", "&": r"\&", "%": r"\%", "$": r"\$",
@@ -85,7 +102,6 @@ _SPECIAUX = {
     "~": r"\textasciitilde{}", "^": r"\textasciicircum{}",
 }
 
-# repère les petites expressions comme  u_5  u_{n+1}  a^2  5^{n+1}
 _MOT_MATHS = re.compile(r"[A-Za-z0-9]+(?:[_^](?:\{[^{}]*\}|[A-Za-z0-9]+))+")
 
 
@@ -94,7 +110,6 @@ def echapper_latex(texte):
 
 
 def titre_vers_latex(titre):
-    """Échappe un titre d'exercice et met en mode math les u_5, a^2, etc."""
     titre = titre or ""
     morceaux, pos = [], 0
     for m in _MOT_MATHS.finditer(titre):
@@ -112,7 +127,6 @@ def annee_scolaire():
 
 
 def recuperer_exercices(ids):
-    """Renvoie {id: (titre, niveau, enonce)} pour les id trouvés en base."""
     if not ids:
         return {}
     marques = ",".join("?" * len(ids))
@@ -125,13 +139,11 @@ def recuperer_exercices(ids):
 
 
 def formater_points(x):
-    """4.0 -> « 4 points », 2.5 -> « 2,5 points », 1 -> « 1 point »."""
     nombre = f"{x:g}".replace(".", ",")
     return f"{nombre}~point" + ("s" if x > 1 else "")
 
 
 def nettoyer_points(points, trouves):
-    """Garde uniquement les points valides (0 < x <= 100) des exercices trouvés."""
     propres = {}
     for cle, valeur in (points or {}).items():
         try:
@@ -143,15 +155,237 @@ def nettoyer_points(points, trouves):
     return propres
 
 
+def generer_page_presentation(titre_fiche, lycee, niveau_affiche, date_du_jour,
+                              duree="", total=0, nb_exercices=0, citation="",
+                              auteur_citation="", calculatrice=""):
+    """Page de garde dans le style des chapitres (couleur col1, cadre, citation)."""
+    lignes_infos = [r"\textbf{Date :} " + date_du_jour]
+    if duree:
+        lignes_infos.append(r"\textbf{Durée :} " + echapper_latex(duree))
+    if total > 0:
+        lignes_infos.append(r"\textbf{Barème :} " + formater_points(total))
+    if nb_exercices:
+        lignes_infos.append(r"\textbf{Nombre d'exercices :} " + str(nb_exercices))
+    if calculatrice:
+        lignes_infos.append(r"\textbf{" + echapper_latex(calculatrice) + "}")
+    infos = r" \\[2mm] ".join(lignes_infos)
+
+    bloc_citation = ""
+    if citation:
+        signature = ""
+        if auteur_citation:
+            signature = r"\par\vspace{2mm}\hfill--- \textsc{" + echapper_latex(auteur_citation) + "}"
+        bloc_citation = r"""
+\vspace{1.2cm}
+\begin{center}
+\begin{minipage}{0.75\textwidth}
+\color{col1!80!black}\itshape\large
+\og """ + echapper_latex(citation) + r""" \fg""" + signature + r"""
+\end{minipage}
+\end{center}
+"""
+
+    return r"""
+\begin{titlepage}
+\begin{tikzpicture}[remember picture,overlay]
+  % bandeaux de couleur haut et bas
+  \fill[col1] (current page.north west) rectangle ([yshift=-2.2cm]current page.north east);
+  \fill[col1] (current page.south west) rectangle ([yshift=1.4cm]current page.south east);
+  % cadre fin
+  \draw[col1,line width=1.2pt] ([xshift=1.2cm,yshift=-2.8cm]current page.north west)
+        rectangle ([xshift=-1.2cm,yshift=2cm]current page.south east);
+  % texte des bandeaux
+  \node[text=white,font=\Large\bfseries,anchor=west] at ([xshift=1.5cm,yshift=-1.1cm]current page.north west)
+        {""" + echapper_latex(lycee) + r"""};
+  \node[text=white,font=\large,anchor=east] at ([xshift=-1.5cm,yshift=-1.1cm]current page.north east)
+        {Année scolaire """ + annee_scolaire() + r"""};
+  \node[text=white,font=\small] at ([yshift=0.7cm]current page.south)
+        {Mathématiques};
+  % motif décoratif (logo provisoire)
+  \begin{scope}[shift={([yshift=-6.3cm]current page.north)}]
+    \draw[col1,line width=1pt] (0,0) circle (1.3);
+    \draw[col1!60,line width=0.8pt] (0,0) circle (1.0);
+    \draw[col1,line width=1.2pt,domain=-0.9:0.9,smooth,samples=40] plot (\x,{0.9*sin(200*\x)});
+    \draw[col1!60,->,>=stealth] (-1.1,0) -- (1.1,0);
+    \draw[col1!60,->,>=stealth] (0,-1.1) -- (0,1.1);
+  \end{scope}
+\end{tikzpicture}
+
+\vspace*{6.2cm}
+\begin{center}
+  {\Large\color{col1!80!black}\textsc{""" + echapper_latex(niveau_affiche) + r"""}}\\[0.8cm]
+  {\color{col1}\rule{0.6\textwidth}{1.5pt}}\\[0.6cm]
+  {\fontsize{30}{36}\selectfont\bfseries\color{col1} """ + echapper_latex(titre_fiche) + r"""}\\[0.6cm]
+  {\color{col1}\rule{0.6\textwidth}{1.5pt}}
+\end{center}
+""" + bloc_citation + r"""
+\vfill
+\begin{center}
+\begin{tikzpicture}
+  \node[draw=col1,line width=1pt,rounded corners=6pt,fill=col1!7,inner sep=12pt,align=left,text width=9cm]
+  {""" + infos + r"""};
+\end{tikzpicture}
+\end{center}
+
+\vspace*{2cm}
+\end{titlepage}
+"""
+
+
+# ---------------------------------------------------------------------------
+# Page de présentation « Comme mes chapitres » (style perso, version épurée)
+# ---------------------------------------------------------------------------
+MACROS_CHAPITRE = r"""
+\definecolor{col2}{RGB}{248, 193, 12}
+% Ornements : pgfornament s'il est installé, sinon un simple losange
+\IfFileExists{pgfornament.sty}{\usepackage{pgfornament}\def\ornok{1}}{}
+\providecommand{\orn}[3]{\ifdefined\ornok\pgfornament[width=#2,color=#3]{#1}\else\textcolor{#3}{$\blacklozenge$}\fi}
+% Logo avec le niveau écrit sur la bande (comme logoVincent)
+\providecommand{\logoNiveau}[3][1]{%
+  \begin{tikzpicture}[scale=#1, very thick]
+    \def\arete{2.0}\def\epaisseur{0.9}\def\rayon{0.4}
+    \def\ruban{(0,0) ++(0:0.57735*\arete-0.57735*\epaisseur+2*\rayon)
+      ++(-30:\epaisseur-1.73205*\rayon)
+      arc (60:0:\rayon) -- ++(90:\epaisseur)
+      arc (0:60:\rayon) -- ++(150:\arete)
+      arc (60:120:\rayon) -- ++(210:\epaisseur)
+      arc (120:60:\rayon) -- cycle}
+    \shade[draw=col2!50, top color=col1!80!white, bottom color=col1!60!black] \ruban;
+    \shade[draw=col2!50, top color=col1!80!white, bottom color=col1!60!black, rotate=120] \ruban;
+    \shade[draw=col2!50, top color=col1!80!white, bottom color=col1!60!black, rotate=-120] \ruban;
+    \draw[col2, line width=0.4pt, opacity=0.7] \ruban;
+    \draw[col2, line width=0.4pt, opacity=0.7, rotate=120] \ruban;
+    \draw[col2, line width=0.4pt, opacity=0.7, rotate=-120] \ruban;
+    \node at (172:1.1) [rotate=90, color=col2, font=\bfseries#3\selectfont, inner sep=0pt] {#2};
+    \node at (-42:1.2) [rotate=30, color=col2, font=\itshape\fontsize{9}{11}\selectfont, inner sep=0pt] {Math\;Brel};
+    \begin{scope}[scale=0.42]
+      \draw[col2, line width=0.6pt] (0,0.9) -- (-0.78,-0.45) -- (0.78,-0.45) -- cycle;
+      \draw[col2, line width=0.45pt] (0,-0.15) -- (-0.39,-0.45) -- (0.39,-0.45) -- cycle;
+      \draw[col2, line width=0.3pt] (0,0.4) -- (-0.2,0.1) -- (0.2,0.1) -- cycle;
+      \draw[col2, line width=0.3pt] (-0.4,-0.05) -- (-0.6,-0.35) -- (-0.2,-0.35) -- cycle;
+      \draw[col2, line width=0.3pt] (0.4,-0.05) -- (0.2,-0.35) -- (0.6,-0.35) -- cycle;
+    \end{scope}
+  \end{tikzpicture}%
+}
+% Logo bande de Möbius
+\providecommand{\logoSaid}[1][1]{%
+  \begin{tikzpicture}[scale=#1, very thick]
+    \def\arete{2.0}\def\epaisseur{0.9}\def\rayon{0.4}
+    \def\ruban{(0,0) ++(0:0.57735*\arete-0.57735*\epaisseur+2*\rayon)
+      ++(-30:\epaisseur-1.73205*\rayon)
+      arc (60:0:\rayon) -- ++(90:\epaisseur)
+      arc (0:60:\rayon) -- ++(150:\arete)
+      arc (60:120:\rayon) -- ++(210:\epaisseur)
+      arc (120:60:\rayon) -- cycle}
+    \shade[draw=col2!50, top color=col1!80!white, bottom color=col1!60!black] \ruban;
+    \shade[draw=col2!50, top color=col1!80!white, bottom color=col1!60!black, rotate=120] \ruban;
+    \shade[draw=col2!50, top color=col1!80!white, bottom color=col1!60!black, rotate=-120] \ruban;
+    \draw[col2, line width=0.4pt, opacity=0.7] \ruban;
+    \draw[col2, line width=0.4pt, opacity=0.7, rotate=120] \ruban;
+    \draw[col2, line width=0.4pt, opacity=0.7, rotate=-120] \ruban;
+    \begin{scope}[scale=0.42]
+      \draw[col2, line width=0.6pt] (0,0.9) -- (-0.78,-0.45) -- (0.78,-0.45) -- cycle;
+      \draw[col2, line width=0.45pt] (0,-0.15) -- (-0.39,-0.45) -- (0.39,-0.45) -- cycle;
+      \draw[col2, line width=0.3pt] (0,0.4) -- (-0.2,0.1) -- (0.2,0.1) -- cycle;
+      \draw[col2, line width=0.3pt] (-0.4,-0.05) -- (-0.6,-0.35) -- (-0.2,-0.35) -- cycle;
+      \draw[col2, line width=0.3pt] (0.4,-0.05) -- (0.2,-0.35) -- (0.6,-0.35) -- cycle;
+    \end{scope}
+  \end{tikzpicture}%
+}
+"""
+
+
+def generer_page_chapitre(titre_fiche, lycee, niveau_affiche, date_du_jour,
+                          duree="", total=0, nb_exercices=0, citation="",
+                          auteur_citation="", calculatrice=""):
+    """Page de garde dans le style des chapitres (bandeau, ornements, logo Möbius)."""
+    ligne_duree = ""
+    if duree:
+        ligne_duree = r"\\[6pt]{\LARGE\color{col1}\scshape Durée : " + echapper_latex(duree) + "}"
+    ligne_calc = ""
+    if calculatrice:
+        ligne_calc = r"{\large\color{col1}\itshape " + echapper_latex(calculatrice) + r"}\par\vspace{0.6\baselineskip}"
+    # niveau en capitales (bande latérale et logo)
+    niveau_maj = echapper_latex((niveau_affiche or "").upper())
+    # sur le logo : le niveau sans le numéro de groupe (« Seconde 7 » -> « SECONDE »)
+    niveau_logo = re.sub(r"\s*\d+\s*$", "", (niveau_affiche or "").strip()).upper()
+    # taille du texte adaptée à sa longueur pour rester sur la bande
+    t = min(12, round(62 / max(len(niveau_logo), 1), 1))
+    taille_logo = r"\fontsize{" + str(t) + "}{" + str(t + 2) + "}"
+    niveau_logo = echapper_latex(niveau_logo)
+
+    infos = [r"Date : " + date_du_jour]
+    if total > 0:
+        infos.append(r"Barème : " + formater_points(total))
+    if nb_exercices:
+        infos.append(str(nb_exercices) + " exercice" + ("s" if nb_exercices > 1 else ""))
+    ligne_infos = r"\quad\textcolor{col2}{$\bullet$}\quad ".join(infos)
+
+    bloc_citation = ""
+    if citation:
+        signature = ""
+        if auteur_citation:
+            signature = r"\\[3pt]{\small\color{col1}--- \textsc{" + echapper_latex(auteur_citation) + "}}"
+        bloc_citation = (r"{\large\color{col1}\itshape \og " + echapper_latex(citation)
+                         + r" \fg}" + signature)
+
+    return r"""
+\begin{titlepage}
+\begin{tikzpicture}[remember picture,overlay]
+  \fill[col1] (current page.north west) rectangle ([xshift=1cm]current page.south west);
+  \node[white,rotate=90,anchor=east] at ([xshift=0.5cm,yshift=-2.5cm]current page.north west)
+       {\Large\bfseries\sffamily """ + niveau_maj + r"""};
+  \node[white,rotate=90] at ([xshift=0.5cm,yshift=4.7cm]current page.south west)
+       {\Large\bfseries\sffamily LPO};
+\end{tikzpicture}%
+\centering
+\vspace*{\baselineskip}
+
+\noindent{\color{col2}\rule{\textwidth}{2.5pt}}\\[6pt]
+\noindent\colorbox{col1}{%
+  \parbox[c][1.4cm][c]{\dimexpr\textwidth-2\fboxsep\relax}{%
+    \centering\color{white}\Large\scshape
+    \orn{97}{1cm}{white}\quad """ + echapper_latex(niveau_affiche) + r"""\quad\orn{98}{1cm}{white}
+  }%
+}\\[6pt]
+\noindent{\color{col2}\rule{\textwidth}{2.5pt}}
+
+\vspace{1.2\baselineskip}
+{\large\color{col1}\orn{88}{0.6cm}{col1}\quad\scshape Mathématiques\quad\orn{88}{0.6cm}{col1}}
+
+\vspace{2.5\baselineskip}
+{\Huge\bfseries\color{col1}\scshape """ + echapper_latex(titre_fiche) + r"""}""" + ligne_duree + r"""
+
+\vspace{0.8\baselineskip}
+{\color{col2}\rule{0.35\textwidth}{1.5pt}}
+\vspace{0.8\baselineskip}
+
+""" + ligne_calc + bloc_citation + r"""
+
+\vfill
+{\color{col1}""" + ligne_infos + r"""}
+
+\vspace{\baselineskip}
+\orn{75}{4.5cm}{col1}
+
+\vfill
+{\large\color{col1}\scshape """ + echapper_latex(lycee) + r"""}
+
+\vspace{0.8\baselineskip}
+\logoNiveau[0.9]{""" + niveau_logo + r"""}{""" + taille_logo + r"""}
+
+\vspace{0.8\baselineskip}
+\colorbox{col1}{\parbox{3.6cm}{\centering\color{white}\bfseries Année """ + annee_scolaire().replace("-", "/") + r"""}}
+\end{titlepage}
+"""
+
+
 def assembler_et_compiler(liste_choix, titre_fiche="Feuille d'exercices",
                           classe_fiche="", etablissement_fiche="", duree_fiche="",
-                          points=None):
-    """Compile la feuille. Renvoie (chemin_pdf, dossier_temporaire).
-
-    L'appelant doit supprimer le dossier temporaire une fois le PDF envoyé.
-    Lève ValueError si la demande est invalide, ErreurGeneration si LaTeX échoue.
-    """
-    ids = list(dict.fromkeys(liste_choix))  # supprime les doublons, garde l'ordre
+                          points=None, page_presentation=False,
+                          citation="", auteur_citation="",
+                          style_presentation="moderne", calculatrice=""):
+    ids = list(dict.fromkeys(liste_choix))
     if not ids:
         raise ValueError("Aucun exercice sélectionné.")
     if len(ids) > MAX_EXERCICES:
@@ -164,24 +398,44 @@ def assembler_et_compiler(liste_choix, titre_fiche="Feuille d'exercices",
     if not trouves:
         raise ValueError("Aucun des exercices demandés n'existe dans la base.")
 
-    lycee = (etablissement_fiche or "").strip().upper() or "LYCÉE POLYVALENT JACQUES BREL"
+    lycee = (etablissement_fiche or "").strip() or "LPO Jacques Brel"
+    
     if classe_fiche and classe_fiche.strip():
         niveau_affiche = classe_fiche.strip()
-    else:  # déduit des exercices choisis
+    else:
         niveaux = list(dict.fromkeys(trouves[i][1] for i in ids if i in trouves))
         niveau_affiche = " / ".join(niveaux)
+        
     titre_fiche = (titre_fiche or "").strip() or "Feuille d'exercices"
     date_du_jour = datetime.now().strftime("%d/%m/%Y")
     duree = (duree_fiche or "").strip()
-    # ligne « Durée » sous la date : seulement si le champ est rempli (contrôle, DS…)
-    ligne_duree = (r" \\ \textbf{Durée : } " + echapper_latex(duree)) if duree else ""
-    # barème : points par exercice (facultatif) ; le total est affiché dans l'en-tête
+    texte_calc = TEXTES_CALCULATRICE.get((calculatrice or "").strip(), "")
+    ligne_duree = (r"\\[2mm] {\large Durée : " + echapper_latex(duree) + "}") if duree else ""
+    if texte_calc:
+        ligne_duree += r"\\[1mm] {\itshape " + texte_calc + "}"
     pts = nettoyer_points(points, trouves)
     total = sum(pts[i] for i in ids if i in pts)
     ligne_bareme = (r" \\ \textbf{Barème : } " + formater_points(total)) if total > 0 else ""
 
-    code = PREAMBULE_BASE
-    code += r"""
+    # Utilisation de la fonction dynamique pour générer le préambule avec le bon titre en haut
+    code = generer_preambule(titre_fiche, lycee)
+    if page_presentation and style_presentation == "chapitre":
+        code = code.replace("\\begin{document}", MACROS_CHAPITRE + "\n\\begin{document}", 1)
+    
+    if page_presentation:
+        # Styles : "moderne" (bandeaux verts) ou "chapitre" (comme mes chapitres)
+        fabriques = {"moderne": generer_page_presentation,
+                     "chapitre": generer_page_chapitre}
+        fabrique = fabriques.get(style_presentation, generer_page_presentation)
+        code += fabrique(
+            titre_fiche, lycee, niveau_affiche, date_du_jour, duree, total,
+            len([i for i in ids if i in trouves]),
+            (citation or "").strip(), (auteur_citation or "").strip(),
+            texte_calc,
+        )
+    else:
+        code += r"""
+\thispagestyle{premiere}
 \noindent
 \begin{minipage}[t]{0.5\textwidth}
     \textbf{""" + echapper_latex(lycee) + r"""} \\
@@ -190,19 +444,19 @@ def assembler_et_compiler(liste_choix, titre_fiche="Feuille d'exercices",
 \begin{minipage}[t]{0.5\textwidth}
     \raggedleft
     \textbf{""" + echapper_latex(niveau_affiche) + r"""} \\
-    \textbf{Date : } """ + date_du_jour + ligne_duree + ligne_bareme + r"""
+    \textbf{Date : } """ + date_du_jour + ligne_bareme + r"""
 \end{minipage}
 
-\vspace{0.2cm}
-\noindent\rule{\textwidth}{0.5pt}
 \vspace{0.3cm}
+\noindent{\color{col1}\rule{\textwidth}{0.8pt}}
+\vspace{0.2cm}
 
 \begin{center}
-    {\LARGE \bfseries """ + echapper_latex(titre_fiche) + r"""}
+    {\LARGE \bfseries \color{col1} """ + echapper_latex(titre_fiche) + r"""}""" + ligne_duree + r"""
 \end{center}
 
 \vspace{0.1cm}
-\noindent\rule{\textwidth}{1.5pt}
+\noindent{\color{col1}\rule{\textwidth}{1.5pt}}
 \vspace{0.4cm}
 
 \noindent
@@ -214,7 +468,6 @@ def assembler_et_compiler(liste_choix, titre_fiche="Feuille d'exercices",
         if identifiant not in trouves:
             continue
         titre, niveau, enonce = trouves[identifiant]
-        # barème : « Exercice 1 (4 points) – Titre » (argument facultatif de l'environnement)
         points_exo = ""
         if identifiant in pts:
             points_exo = "[ (" + formater_points(pts[identifiant]) + ")]"
@@ -223,11 +476,11 @@ def assembler_et_compiler(liste_choix, titre_fiche="Feuille d'exercices",
         code += "\\end{exercice}\n"
     code += FOOTER
 
-    return _compiler(code)
+    # La page de présentation utilise des positions absolues : 2 passes nécessaires
+    return _compiler(code, passes=2 if page_presentation else 1)
 
 
-def _compiler(code_tex):
-    # chaque demande a son propre dossier : plus de collision entre deux élèves
+def _compiler(code_tex, passes=1):
     dossier = tempfile.mkdtemp(prefix="fiche_")
     try:
         chemin_tex = os.path.join(dossier, "feuille_exercices.tex")
@@ -236,14 +489,17 @@ def _compiler(code_tex):
             f.write(code_tex)
 
         print("⏳ Compilation du PDF via pdflatex...")
-        try:
-            res = subprocess.run(
-                ["pdflatex", "-interaction=nonstopmode", "-halt-on-error",
-                 "-no-shell-escape", "-output-directory", dossier, chemin_tex],
-                capture_output=True, cwd=dossier, timeout=DELAI_COMPILATION,
-            )
-        except subprocess.TimeoutExpired:
-            raise ErreurGeneration("La compilation LaTeX a pris trop de temps.")
+        for _ in range(passes):
+            try:
+                res = subprocess.run(
+                    ["pdflatex", "-interaction=nonstopmode", "-halt-on-error",
+                     "-no-shell-escape", "-output-directory", dossier, chemin_tex],
+                    capture_output=True, cwd=dossier, timeout=DELAI_COMPILATION,
+                )
+            except subprocess.TimeoutExpired:
+                raise ErreurGeneration("La compilation LaTeX a pris trop de temps.")
+            if res.returncode != 0:
+                break
 
         if res.returncode != 0 or not os.path.exists(chemin_pdf):
             sortie = res.stdout.decode("utf-8", errors="replace")
