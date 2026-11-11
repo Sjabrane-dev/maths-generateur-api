@@ -13,6 +13,7 @@ from starlette.background import BackgroundTask
 from generateur import assembler_et_compiler, ErreurGeneration, MAX_EXERCICES
 from config import CHEMIN_BASE
 from editeur_latex import router as routeur_editeur
+from entrainement import router as routeur_entrainement
 
 app = FastAPI()
 
@@ -115,3 +116,4 @@ if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
 app.include_router(routeur_editeur)
+app.include_router(routeur_entrainement)
