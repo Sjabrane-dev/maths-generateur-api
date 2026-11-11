@@ -14,6 +14,10 @@ MAX_EXERCICES = 40        # limite par feuille (protège le serveur)
 DELAI_COMPILATION = 60    # secondes maximum pour pdflatex
 
 
+# Corrigés : "sans" (énoncés seuls), "fin" (énoncés puis corrigés), "seuls" (corrigés seuls)
+MODES_CORRIGES = ("sans", "fin", "seuls")
+
+
 TEXTES_CALCULATRICE = {
     "autorisee": "Calculatrice autorisée",
     "interdite": "Calculatrice interdite",
@@ -132,10 +136,10 @@ def recuperer_exercices(ids):
     marques = ",".join("?" * len(ids))
     with closing(sqlite3.connect(CHEMIN_BASE)) as conn:
         lignes = conn.execute(
-            f"SELECT id, titre, niveau, enonce FROM exercices WHERE id IN ({marques})",
+            f"SELECT id, titre, niveau, enonce, correction FROM exercices WHERE id IN ({marques})",
             ids,
         ).fetchall()
-    return {l[0]: (l[1], l[2], l[3]) for l in lignes}
+    return {l[0]: (l[1], l[2], l[3], l[4] or "") for l in lignes}
 
 
 def formater_points(x):
@@ -384,7 +388,9 @@ def assembler_et_compiler(liste_choix, titre_fiche="Feuille d'exercices",
                           classe_fiche="", etablissement_fiche="", duree_fiche="",
                           points=None, page_presentation=False,
                           citation="", auteur_citation="",
-                          style_presentation="moderne", calculatrice=""):
+                          style_presentation="moderne", calculatrice="",
+                          corrections="sans"):
+    corrections = corrections if corrections in MODES_CORRIGES else "sans"
     ids = list(dict.fromkeys(liste_choix))
     if not ids:
         raise ValueError("Aucun exercice sélectionné.")
@@ -407,6 +413,8 @@ def assembler_et_compiler(liste_choix, titre_fiche="Feuille d'exercices",
         niveau_affiche = " / ".join(niveaux)
         
     titre_fiche = (titre_fiche or "").strip() or "Feuille d'exercices"
+    if corrections == "seuls":
+        titre_fiche += " — Corrigé"
     date_du_jour = datetime.now().strftime("%d/%m/%Y")
     duree = (duree_fiche or "").strip()
     texte_calc = TEXTES_CALCULATRICE.get((calculatrice or "").strip(), "")
@@ -458,26 +466,54 @@ def assembler_et_compiler(liste_choix, titre_fiche="Feuille d'exercices",
 \vspace{0.1cm}
 \noindent{\color{col1}\rule{\textwidth}{1.5pt}}
 \vspace{0.4cm}
-
+""" + ("" if corrections == "seuls" else r"""
 \noindent
 \textbf{Nom : }\dotfill\qquad\textbf{Prénom : }\dotfill\mbox{}
 
 \vspace{0.4cm}
+""")
+    presents = [i for i in ids if i in trouves]
+    if corrections != "seuls":
+        code += _blocs_enonces(presents, trouves, pts)
+    if corrections == "fin":
+        code += r"""
+\newpage
+\begin{center}
+    {\LARGE \bfseries \color{col1} Corrigés}
+\end{center}
+\noindent{\color{col1}\rule{\textwidth}{1.5pt}}
+\vspace{0.2cm}
 """
-    for identifiant in ids:
-        if identifiant not in trouves:
-            continue
-        titre, niveau, enonce = trouves[identifiant]
+    if corrections in ("fin", "seuls"):
+        code += _blocs_corriges(presents, trouves)
+    code += FOOTER
+
+    # La page de présentation utilise des positions absolues : 2 passes nécessaires
+    return _compiler(code, passes=2 if page_presentation else 1)
+
+
+def _blocs_enonces(presents, trouves, pts):
+    code = ""
+    for identifiant in presents:
+        titre, niveau, enonce, _ = trouves[identifiant]
         points_exo = ""
         if identifiant in pts:
             points_exo = "[ (" + formater_points(pts[identifiant]) + ")]"
         code += "\\begin{exercice}" + points_exo + "{" + titre_vers_latex(titre) + " (" + echapper_latex(niveau) + ")}\n"
         code += enonce + "\n"
         code += "\\end{exercice}\n"
-    code += FOOTER
+    return code
 
-    # La page de présentation utilise des positions absolues : 2 passes nécessaires
-    return _compiler(code, passes=2 if page_presentation else 1)
+
+def _blocs_corriges(presents, trouves):
+    """Corrigés numérotés comme les exercices de la feuille (Exercice 1, 2…)."""
+    code = ""
+    for numero, identifiant in enumerate(presents, 1):
+        titre, niveau, _, correction = trouves[identifiant]
+        code += ("\n\\vspace{0.4cm}\n\\noindent{\\color{col1}\\textbf{Corrigé de l'exercice "
+                 + str(numero) + "}} \\textbf{-- " + titre_vers_latex(titre) + "}\n\\par\\vspace{0.1cm}\n")
+        code += (correction.strip() or r"\emph{Pas de corrigé disponible pour cet exercice.}") + "\n\\par\n"
+    return code
 
 
 def _compiler(code_tex, passes=1):

@@ -46,6 +46,8 @@ class DemandeFiche(BaseModel):
     auteur_citation: str | None = Field(default="", max_length=80)
     # consigne facultative : "" (rien), "autorisee" ou "interdite"
     calculatrice: str | None = Field(default="", max_length=20)
+    # corrigés : "sans" (énoncés seuls), "fin" (énoncés puis corrigés), "seuls" (corrigés seuls)
+    corrections: str | None = Field(default="sans", max_length=10)
 
 
 @app.get("/")
@@ -97,6 +99,7 @@ def api_generer_pdf(demande: DemandeFiche):
             citation=demande.citation or "",
             auteur_citation=demande.auteur_citation or "",
             calculatrice=demande.calculatrice or "",
+            corrections=demande.corrections or "sans",
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
