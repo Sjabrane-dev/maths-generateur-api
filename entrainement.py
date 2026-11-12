@@ -1,6 +1,7 @@
 # Fichier : API_RENDER/entrainement.py
 # Feuilles d'entraînement pour les élèves : exercices tirés au hasard dans
-# banque.db pour un chapitre, avec le corrigé sur des pages séparées.
+# banque.db pour un chapitre, avec le corrigé sur des pages séparées
+# ou dans un PDF à part (partie = "enonces" puis "corrige" avec la même graine).
 #
 # Intégration dans main.py (2 lignes) :
 #     from entrainement import router as routeur_entrainement
@@ -52,6 +53,10 @@ class DemandeEntrainement(BaseModel):
     titre_chapitre: Optional[str] = Field(default="", max_length=150)
     nombre: int = Field(default=4, ge=1, le=NOMBRE_MAX)
     difficulte: int = Field(default=0, ge=0, le=3)                   # 0 = mélange
+    # "tout" : énoncés + corrigé à la fin ; "enonces" ou "corrige" : une seule partie.
+    # Avec la même graine, « enonces » et « corrige » portent sur les mêmes exercices.
+    partie: Optional[str] = Field(default="tout", max_length=8)
+    graine: Optional[int] = Field(default=None, ge=0, le=2_000_000_000)
 
 
 def _normaliser(texte: str) -> str:
@@ -93,8 +98,8 @@ def _trop_de_demandes(ip: str) -> bool:
     return trop
 
 
-def construire_latex(niveau: str, chapitre: str, exercices) -> str:
-    titre = "Entraînement — " + chapitre
+def construire_latex(niveau: str, chapitre: str, exercices, partie: str = "tout") -> str:
+    titre = ("Corrigé — " if partie == "corrige" else "Entraînement — ") + chapitre
     code = generer_preambule(titre if len(titre) <= 80 else "Feuille d'entraînement", "Les Jardins des Délices mathématiques")
     code += r"""
 \thispagestyle{premiere}
@@ -112,16 +117,22 @@ def construire_latex(niveau: str, chapitre: str, exercices) -> str:
 \vspace{0.3cm}
 \noindent{\color{col1}\rule{\textwidth}{0.8pt}}
 \begin{center}
-    {\LARGE \bfseries \color{col1} Feuille d'entraînement}\\[2mm]
+    {\LARGE \bfseries \color{col1} """ + ("Corrigé de la feuille d'entraînement" if partie == "corrige" else "Feuille d'entraînement") + r"""}\\[2mm]
     {\large """ + echapper_latex(chapitre) + r"""}\\[1mm]
-    {\small\itshape Cherche d'abord seul(e) : le corrigé est à la fin.}
+    {\small\itshape """ + {"tout": "Cherche d'abord seul(e) : le corrigé est à la fin.",
+                             "enonces": "Cherche d'abord seul(e) : le corrigé est dans un fichier à part.",
+                             "corrige": "À lire après avoir cherché les exercices !"}.get(partie, "") + r"""}
 \end{center}
 \noindent{\color{col1}\rule{\textwidth}{1.5pt}}
 """
-    for _id, titre_ex, _diff, enonce, _corr in exercices:
-        code += "\\begin{exercice}{" + titre_vers_latex(titre_ex) + "}\n" + enonce + "\n\\end{exercice}\n"
+    if partie != "corrige":
+        for _id, titre_ex, _diff, enonce, _corr in exercices:
+            code += "\\begin{exercice}{" + titre_vers_latex(titre_ex) + "}\n" + enonce + "\n\\end{exercice}\n"
+    if partie == "enonces":
+        return code + FOOTER
 
-    code += r"""
+    if partie != "corrige":
+        code += r"""
 \newpage
 \begin{center}{\LARGE\bfseries\color{col1} Corrigé}\end{center}
 \noindent{\color{col1}\rule{\textwidth}{1.5pt}}
@@ -149,7 +160,7 @@ def api_feuille_entrainement(demande: DemandeEntrainement,
         if not chapitre:
             raise HTTPException(status_code=404, detail="Ce chapitre n'a pas encore d'exercices dans la banque.")
         lignes = conn.execute(
-            "SELECT id, titre, difficulte, enonce, correction FROM exercices WHERE niveau = ? AND chapitre = ?",
+            "SELECT id, titre, difficulte, enonce, correction FROM exercices WHERE niveau = ? AND chapitre = ? ORDER BY id",
             (demande.niveau, chapitre)).fetchall()
 
     if demande.difficulte:
@@ -163,18 +174,21 @@ def api_feuille_entrainement(demande: DemandeEntrainement,
     # priorité aux exercices qui ont un corrigé
     avec = [l for l in choisis if (l[4] or "").strip()]
     sans = [l for l in choisis if not (l[4] or "").strip()]
-    random.shuffle(avec); random.shuffle(sans)
+    partie = demande.partie if demande.partie in ("tout", "enonces", "corrige") else "tout"
+    hasard = random.Random(demande.graine) if demande.graine is not None else random.Random()
+    hasard.shuffle(avec); hasard.shuffle(sans)
     tirage = (avec + sans)[:demande.nombre]
     tirage.sort(key=lambda l: (l[2] or 0))      # du plus facile au plus difficile
 
     if not _verrou.acquire(timeout=40):
         raise HTTPException(status_code=429, detail="Le serveur est occupé : réessaie dans un instant.")
     try:
-        chemin_pdf, dossier = _compiler(construire_latex(demande.niveau, chapitre, tirage))
+        chemin_pdf, dossier = _compiler(construire_latex(demande.niveau, chapitre, tirage, partie))
     except Exception:
         raise HTTPException(status_code=500, detail="La feuille n'a pas pu être fabriquée : réessaie (autre tirage).")
     finally:
         _verrou.release()
 
-    return FileResponse(chemin_pdf, media_type="application/pdf", filename="entrainement.pdf",
+    return FileResponse(chemin_pdf, media_type="application/pdf",
+                        filename="entrainement_corrige.pdf" if partie == "corrige" else "entrainement.pdf",
                         background=BackgroundTask(shutil.rmtree, dossier, ignore_errors=True))
