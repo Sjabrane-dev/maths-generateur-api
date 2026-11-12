@@ -1,5 +1,7 @@
 # Fichier : API_RENDER/generateur.py
+import hashlib
 import os
+import random
 import re
 import shutil
 import sqlite3
@@ -140,6 +142,44 @@ def recuperer_exercices(ids):
             ids,
         ).fetchall()
     return {l[0]: (l[1], l[2], l[3], l[4] or "") for l in lignes}
+
+
+def tirer_version_b(ids_a, variante=0):
+    """Pour chaque exercice du sujet A, choisit un autre exercice de la banque
+    du même niveau, du même chapitre et de la même difficulté (sinon d'une difficulté
+    voisine, sinon du même chapitre). Le tirage est reproductible : mêmes exercices A
+    et même numéro de variante donnent le même sujet B.
+    Renvoie (liste_b, nb_sans_jumeau)."""
+    if not ids_a:
+        return [], 0
+    graine = hashlib.sha256((",".join(ids_a) + "|" + str(int(variante or 0))).encode("utf-8")).hexdigest()
+    hasard = random.Random(int(graine[:16], 16))
+    with closing(sqlite3.connect(CHEMIN_BASE)) as conn:
+        infos = {l[0]: (l[1], l[2], l[3]) for l in conn.execute(
+            f"SELECT id, niveau, chapitre, difficulte FROM exercices WHERE id IN ({','.join('?' * len(ids_a))})",
+            ids_a).fetchall()}
+        groupes = {}
+        for niveau, chapitre in {(v[0], v[1]) for v in infos.values()}:
+            groupes[(niveau, chapitre)] = conn.execute(
+                "SELECT id, difficulte FROM exercices WHERE niveau = ? AND chapitre = ? ORDER BY id",
+                (niveau, chapitre)).fetchall()
+    pris = set(ids_a)
+    liste_b, sans = [], 0
+    for ident in ids_a:
+        if ident not in infos:
+            continue
+        niveau, chapitre, diff = infos[ident]
+        candidats = [(i, d) for i, d in groupes.get((niveau, chapitre), []) if i not in pris]
+        choix = None
+        if candidats:
+            ecart_min = min(abs((d or 0) - (diff or 0)) for _, d in candidats)
+            meilleurs = [i for i, d in candidats if abs((d or 0) - (diff or 0)) == ecart_min]
+            choix = hasard.choice(meilleurs)
+        if choix is None:
+            choix, sans = ident, sans + 1   # aucun autre exercice dans ce chapitre : on garde le même
+        pris.add(choix)
+        liste_b.append(choix)
+    return liste_b, sans
 
 
 def formater_points(x):
@@ -389,8 +429,9 @@ def assembler_et_compiler(liste_choix, titre_fiche="Feuille d'exercices",
                           points=None, page_presentation=False,
                           citation="", auteur_citation="",
                           style_presentation="moderne", calculatrice="",
-                          corrections="sans"):
+                          corrections="sans", versions="A", variante=0):
     corrections = corrections if corrections in MODES_CORRIGES else "sans"
+    deux_versions = (versions or "A").upper() == "AB"
     ids = list(dict.fromkeys(liste_choix))
     if not ids:
         raise ValueError("Aucun exercice sélectionné.")
@@ -403,6 +444,11 @@ def assembler_et_compiler(liste_choix, titre_fiche="Feuille d'exercices",
         print(f"⚠️ Exercices absents de la base : {introuvables}")
     if not trouves:
         raise ValueError("Aucun des exercices demandés n'existe dans la base.")
+
+    ids_b = []
+    if deux_versions:
+        ids_b, _ = tirer_version_b([i for i in ids if i in trouves], variante)
+        trouves.update(recuperer_exercices([i for i in ids_b if i not in trouves]))
 
     lycee = (etablissement_fiche or "").strip() or "LPO Jacques Brel"
     
@@ -423,6 +469,8 @@ def assembler_et_compiler(liste_choix, titre_fiche="Feuille d'exercices",
         ligne_duree += r"\\[1mm] {\itshape " + texte_calc + "}"
     pts = nettoyer_points(points, trouves)
     total = sum(pts[i] for i in ids if i in pts)
+    presents = [i for i in ids if i in trouves]
+    pts_b = {b_: pts[a_] for a_, b_ in zip(presents, ids_b) if a_ in pts}
     ligne_bareme = (r" \\ \textbf{Barème : } " + formater_points(total)) if total > 0 else ""
 
     # Utilisation de la fonction dynamique pour générer le préambule avec le bon titre en haut
@@ -430,7 +478,9 @@ def assembler_et_compiler(liste_choix, titre_fiche="Feuille d'exercices",
     if page_presentation and style_presentation == "chapitre":
         code = code.replace("\\begin{document}", MACROS_CHAPITRE + "\n\\begin{document}", 1)
     
-    if page_presentation:
+    def entete(titre_fiche):
+      code = ""
+      if page_presentation:
         # Styles : "moderne" (bandeaux verts) ou "chapitre" (comme mes chapitres)
         fabriques = {"moderne": generer_page_presentation,
                      "chapitre": generer_page_chapitre}
@@ -441,7 +491,7 @@ def assembler_et_compiler(liste_choix, titre_fiche="Feuille d'exercices",
             (citation or "").strip(), (auteur_citation or "").strip(),
             texte_calc,
         )
-    else:
+      else:
         code += r"""
 \thispagestyle{premiere}
 \noindent
@@ -472,24 +522,48 @@ def assembler_et_compiler(liste_choix, titre_fiche="Feuille d'exercices",
 
 \vspace{0.4cm}
 """)
-    presents = [i for i in ids if i in trouves]
-    if corrections != "seuls":
-        code += _blocs_enonces(presents, trouves, pts)
-    if corrections == "fin":
-        code += r"""
-\newpage
-\begin{center}
-    {\LARGE \bfseries \color{col1} Corrigés}
-\end{center}
-\noindent{\color{col1}\rule{\textwidth}{1.5pt}}
-\vspace{0.2cm}
-"""
-    if corrections in ("fin", "seuls"):
-        code += _blocs_corriges(presents, trouves)
+      return code
+
+    if not deux_versions:
+        code += entete(titre_fiche)
+        if corrections != "seuls":
+            code += _blocs_enonces(presents, trouves, pts)
+        if corrections == "fin":
+            code += _titre_corriges("Corrigés")
+        if corrections in ("fin", "seuls"):
+            code += _blocs_corriges(presents, trouves)
+    else:
+        versions_ab = [("A", presents, pts), ("B", ids_b, pts_b)]
+        if corrections != "seuls":
+            for k, (lettre, liste, p) in enumerate(versions_ab):
+                if k:
+                    code += "\n\\newpage\n\\setcounter{page}{1}\n"
+                code += "\\setcounter{exocount}{0}\n" + entete(titre_fiche + " — Sujet " + lettre)
+                code += _blocs_enonces(liste, trouves, p)
+        if corrections in ("fin", "seuls"):
+            for k, (lettre, liste, p) in enumerate(versions_ab):
+                if corrections == "seuls" and k == 0:
+                    code += entete(titre_fiche + " — Sujet " + lettre)
+                elif corrections == "seuls":
+                    code += "\n\\newpage\n" + entete(titre_fiche + " — Sujet " + lettre)
+                else:
+                    code += _titre_corriges("Corrigés — Sujet " + lettre)
+                code += _blocs_corriges(liste, trouves)
     code += FOOTER
 
     # La page de présentation utilise des positions absolues : 2 passes nécessaires
     return _compiler(code, passes=2 if page_presentation else 1)
+
+
+def _titre_corriges(texte):
+    return r"""
+\newpage
+\begin{center}
+    {\LARGE \bfseries \color{col1} """ + echapper_latex(texte) + r"""}
+\end{center}
+\noindent{\color{col1}\rule{\textwidth}{1.5pt}}
+\vspace{0.2cm}
+"""
 
 
 def _blocs_enonces(presents, trouves, pts):

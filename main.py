@@ -48,6 +48,9 @@ class DemandeFiche(BaseModel):
     calculatrice: str | None = Field(default="", max_length=20)
     # corrigés : "sans" (énoncés seuls), "fin" (énoncés puis corrigés), "seuls" (corrigés seuls)
     corrections: str | None = Field(default="sans", max_length=10)
+    # devoirs A/B : "A" (une seule version) ou "AB" (sujet B tiré dans la banque : même chapitre, même difficulté)
+    versions: str | None = Field(default="A", max_length=2)
+    variante: int = Field(default=0, ge=0, le=999)   # autre tirage du sujet B
 
 
 @app.get("/")
@@ -100,6 +103,8 @@ def api_generer_pdf(demande: DemandeFiche):
             auteur_citation=demande.auteur_citation or "",
             calculatrice=demande.calculatrice or "",
             corrections=demande.corrections or "sans",
+            versions=demande.versions or "A",
+            variante=demande.variante or 0,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
