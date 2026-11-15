@@ -5,3 +5,6 @@ __pycache__/
 *.avant
 banque_sauvegarde.db
 feuille_exercices.*
+*.avant_*
+test_*.pdf
+test_presentation.py
