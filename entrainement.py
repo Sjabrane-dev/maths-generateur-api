@@ -37,7 +37,7 @@ except Exception as erreur_import:          # pragma: no cover
     DISPONIBLE = False
 
 NIVEAUX = {"Seconde", "Première ST2S", "Première spé", "Terminale spé",
-           "Maths expertes", "Terminale ST2S", "BTS SIO 1", "BTS SIO 2", "Première maths spécifiques"}
+           "Maths expertes", "Terminale ST2S", "BTS SIO 1", "BTS SIO 2", "Première maths spécifiques", "Terminale maths complémentaires"}
 NOMBRE_MAX = 6
 LIMITE_PAR_MINUTE = 6
 
