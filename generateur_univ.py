@@ -1,5 +1,5 @@
 # Fichier : API_RENDER/generateur_univ.py
-"""Générateur universitaire : feuilles d'exercices tirées de la banque Exo7 (classes prépa, licence).
+"""Générateur universitaire : feuilles d'exercices tirées de la banque Exo7 (classes prépa, M1-M2).
 
 Routes :
   GET  /univ/chapitres                 -> chapitres (année, filières, nombre d'exercices)
@@ -75,7 +75,7 @@ PREAMBULE = r"""\documentclass[11pt,a4paper]{article}
 \renewcommand{\headrulewidth}{0.6pt}\renewcommand{\footrulewidth}{0.3pt}
 \fancypagestyle{premiere}{\fancyhead{}\renewcommand{\headrulewidth}{0pt}}
 \newcounter{numexo}
-\newcommand{\Exo}[2]{\par\bigskip\refstepcounter{numexo}\noindent{\color{col1}\large\bfseries Exercice \thenumexo}\hfill{\scriptsize\color{gray}#1 -- #2}\par\nopagebreak\smallskip}
+\newcommand{\Exo}[3]{\par\bigskip\refstepcounter{numexo}\noindent{\color{col1}\large\bfseries Exercice \thenumexo}{\color{col1}#3}\hfill{\scriptsize\color{gray}#1 -- #2}\par\nopagebreak\smallskip}
 \newcommand{\Rubrique}[1]{\par\bigskip\noindent{\color{col1}\rule{\linewidth}{0.8pt}}\par\noindent{\color{col1}\Large\bfseries #1}\par\noindent{\color{col1}\rule{\linewidth}{0.8pt}}\par}
 \newcommand{\Bloc}[2]{\par\medskip\refstepcounter{numexo}\noindent{\color{col1}\bfseries #1 \thenumexo}\hfill{\scriptsize\color{gray}#2}\par\nopagebreak\smallskip}
 """
@@ -93,7 +93,11 @@ def construire_tex(ids, titre, sous_titre, corrections, indications):
         t.append(r"\setcounter{numexo}{0}")
         for e in exos:
             if not e.get(cle):
-                t.append(r"\refstepcounter{numexo}")
+                if cle == "correction":
+                    t.append(r"\Bloc{%s}{Exo7 n\textsuperscript{o}\,%s}" % (nom, e["id"].split("-")[1]))
+                    t.append(r"\textit{Pas de corrigé disponible dans la banque Exo7 pour cet exercice.}")
+                else:
+                    t.append(r"\refstepcounter{numexo}")
                 continue
             t.append(r"\Bloc{%s}{Exo7 n\textsuperscript{o}\,%s}" % (nom, e["id"].split("-")[1]))
             t.append(e[cle])
@@ -101,7 +105,12 @@ def construire_tex(ids, titre, sous_titre, corrections, indications):
     if corrections != "seuls":
         t.append(r"\setcounter{numexo}{0}")
         for e in exos:
-            t.append(r"\Exo{Exo7 n\textsuperscript{o}\,%s}{%s}" % (e["id"].split("-")[1], echapper(e["auteur"])))
+            entete = ""
+            if e.get("titre"):
+                entete += r" -- \textit{" + e["titre"] + "}"
+            if e.get("difficulte"):
+                entete += r"\quad$" + r"\star" * e["difficulte"] + "$"
+            t.append(r"\Exo{Exo7 n\textsuperscript{o}\,%s}{%s}{%s}" % (e["id"].split("-")[1], echapper(e["auteur"]), entete))
             t.append(e["enonce"])
     if indications and any(e.get("indication") for e in exos) and corrections != "seuls":
         t.append(r"\clearpage\Rubrique{Indications}")
@@ -141,7 +150,9 @@ class DemandeUniv(BaseModel):
 
 @router.get("/chapitres")
 def univ_chapitres():
-    return [dict(c, nombre=len(PAR_CHAPITRE.get(c["cle"], []))) for c in CHAPITRES]
+    return [dict(c, nombre=len(PAR_CHAPITRE.get(c["cle"], [])),
+                 corriges=sum(1 for e in PAR_CHAPITRE.get(c["cle"], []) if e.get("correction")))
+            for c in CHAPITRES]
 
 
 @router.get("/exercices/{chapitre}")
