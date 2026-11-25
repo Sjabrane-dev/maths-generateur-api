@@ -248,8 +248,15 @@ def construire_tex(ids, titre, classe, corrections, indications, etablissement="
     return code + FOOTER
 
 
+IMAGES = os.path.join(ICI, "images_exo7")     # figures d'Exo7, appelées « ../images/… »
+
+
 def compiler(tex):
-    dossier = tempfile.mkdtemp(prefix="univ_")
+    racine = tempfile.mkdtemp(prefix="univ_")
+    dossier = os.path.join(racine, "doc")
+    os.makedirs(dossier)
+    if os.path.isdir(IMAGES):
+        os.symlink(IMAGES, os.path.join(racine, "images"))
     with open(os.path.join(dossier, "fiche.tex"), "w", encoding="utf-8") as f:
         f.write(tex)
     try:
@@ -257,13 +264,13 @@ def compiler(tex):
             subprocess.run(["pdflatex", "-interaction=nonstopmode", "fiche.tex"], cwd=dossier,
                            capture_output=True, timeout=DELAI_COMPILATION)
     except subprocess.TimeoutExpired:
-        shutil.rmtree(dossier, ignore_errors=True)
+        shutil.rmtree(racine, ignore_errors=True)
         raise HTTPException(status_code=500, detail="La compilation a pris trop de temps.")
     pdf = os.path.join(dossier, "fiche.pdf")
     if not os.path.exists(pdf):
-        shutil.rmtree(dossier, ignore_errors=True)
+        shutil.rmtree(racine, ignore_errors=True)
         raise HTTPException(status_code=500, detail="La compilation LaTeX a échoué.")
-    return pdf, dossier
+    return pdf, racine
 
 
 class DemandeUniv(BaseModel):
