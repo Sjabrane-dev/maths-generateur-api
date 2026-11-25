@@ -15,8 +15,10 @@ from datetime import datetime
 import shutil
 import subprocess
 import tempfile
+import threading
+import time
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Header, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from starlette.background import BackgroundTask
@@ -27,6 +29,23 @@ ICI = os.path.dirname(os.path.abspath(__file__))
 CHEMIN_BANQUE = os.path.join(ICI, "banque_univ.json")
 MAX_EXERCICES = 30
 DELAI_COMPILATION = 90
+LIMITE_PAR_MINUTE = 6                    # feuilles par adresse IP et par minute (contre les abus)
+
+_verrou = threading.Semaphore(1)         # une seule compilation à la fois sur le serveur
+_historique = {}
+
+
+def _trop_de_demandes(ip):
+    maintenant = time.time()
+    liste = [t for t in _historique.get(ip, []) if maintenant - t < 60]
+    trop = len(liste) >= LIMITE_PAR_MINUTE
+    if not trop:
+        liste.append(maintenant)
+    _historique[ip] = liste
+    if len(_historique) > 5000:          # ménage : on oublie les adresses inactives
+        for cle in [k for k, v in _historique.items() if not v or maintenant - v[-1] > 60]:
+            del _historique[cle]
+    return trop
 
 with open(CHEMIN_BANQUE, encoding="utf-8") as f:
     _DONNEES = json.load(f)
@@ -278,7 +297,10 @@ def univ_exercices(chapitre: str):
 
 
 @router.post("/generer-pdf")
-def univ_generer_pdf(demande: DemandeUniv):
+def univ_generer_pdf(demande: DemandeUniv, x_forwarded_for: str | None = Header(default=None)):
+    ip = (x_forwarded_for or "inconnue").split(",")[0].strip()
+    if _trop_de_demandes(ip):
+        raise HTTPException(status_code=429, detail="Trop de feuilles demandées : patientez une minute.")
     inconnus = [i for i in demande.exercices if i not in EXERCICES]
     if inconnus:
         raise HTTPException(status_code=400, detail="Exercice inconnu : " + inconnus[0])
@@ -288,6 +310,11 @@ def univ_generer_pdf(demande: DemandeUniv):
                          demande.calculatrice or "", demande.page_presentation,
                          demande.style_presentation or "moderne", demande.citation or "", demande.auteur_citation or "",
                          demande.points)
-    pdf, dossier = compiler(tex)
+    if not _verrou.acquire(timeout=60):
+        raise HTTPException(status_code=503, detail="Le serveur est occupé : réessayez dans un instant.")
+    try:
+        pdf, dossier = compiler(tex)
+    finally:
+        _verrou.release()
     return FileResponse(pdf, media_type="application/pdf", filename="feuille_universitaire.pdf",
                         background=BackgroundTask(shutil.rmtree, dossier, ignore_errors=True))
