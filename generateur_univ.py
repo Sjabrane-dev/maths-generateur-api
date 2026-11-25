@@ -337,7 +337,7 @@ class Planche(BaseModel):
 
 
 class DemandeColle(BaseModel):
-    planches: list[Planche] = Field(min_length=1, max_length=4)
+    planches: list[Planche]       # 1 à 4 planches (vérifié dans la route : pydantic 1 et 2)
     titre: str | None = Field(default="Colle", max_length=120)
     sous_titre: str | None = Field(default="", max_length=120)
     etablissement: str | None = Field(default="", max_length=120)
@@ -394,8 +394,12 @@ def univ_generer_colle(demande: DemandeColle, x_forwarded_for: str | None = Head
     ip = (x_forwarded_for or "inconnue").split(",")[0].strip()
     if _trop_de_demandes(ip):
         raise HTTPException(status_code=429, detail="Trop de documents demandés : patientez une minute.")
+    if not 1 <= len(demande.planches) <= 4:
+        raise HTTPException(status_code=400, detail="Une à quatre planches par document.")
     planches = []
     for p in demande.planches:
+        if not 1 <= len(p.exercices) <= 4:
+            raise HTTPException(status_code=400, detail="Une planche contient de un à quatre exercices.")
         ids = list(dict.fromkeys(p.exercices))
         inconnus = [i for i in ids if i not in EXERCICES]
         if inconnus:
