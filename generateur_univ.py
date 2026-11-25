@@ -11,6 +11,7 @@ chaque feuille cite la source, l'identifiant et l'auteur de chaque exercice.
 """
 import json
 import os
+from datetime import datetime
 import shutil
 import subprocess
 import tempfile
@@ -43,83 +44,189 @@ def echapper(texte):
         for c in (texte or ""))
 
 
-PREAMBULE = r"""\documentclass[11pt,a4paper]{article}
-\usepackage[utf8]{inputenc}
-\usepackage[T1]{fontenc}
-\usepackage{lmodern}
-\usepackage[french]{babel}
-\usepackage{amsmath,amsfonts,amssymb}
-\usepackage{geometry,fancyhdr,xcolor,array,fancybox,tikz}
-\geometry{hmargin=2cm,vmargin=2.3cm}
-\definecolor{col1}{RGB}{12,102,98}
-\definecolor{col2}{RGB}{248,193,12}
-% ----- commandes de la banque Exo7
+from generateur import (generer_preambule, generer_page_presentation, generer_page_chapitre,
+                        MACROS_CHAPITRE, FOOTER, annee_scolaire, TEXTES_CALCULATRICE, formater_points)
+
+# commandes de la banque Exo7 (ajoutées au préambule du générateur du lycée)
+MACROS_EXO7 = r"""
+\usepackage{fancybox}
 \newcommand{\Nn}{\mathbb{N}}\newcommand{\Zz}{\mathbb{Z}}\newcommand{\Qq}{\mathbb{Q}}
 \newcommand{\Rr}{\mathbb{R}}\newcommand{\Cc}{\mathbb{C}}\newcommand{\Kk}{\mathbb{K}}
 \renewcommand{\epsilon}{\varepsilon}
-\renewcommand{\Re}{\mathop{\mathrm{Re}}\nolimits}\renewcommand{\Im}{\mathop{\mathrm{Im}}\nolimits}
 \renewcommand{\ge}{\geqslant}\renewcommand{\geq}{\geqslant}\renewcommand{\le}{\leqslant}\renewcommand{\leq}{\leqslant}
-\newcommand{\dd}{\mathrm{d}}
-\newcommand{\ch}{\mathop{\mathrm{ch}}\nolimits}\newcommand{\sh}{\mathop{\mathrm{sh}}\nolimits}
-\renewcommand{\tanh}{\mathop{\mathrm{th}}\nolimits}\newcommand{\cotan}{\mathop{\mathrm{cotan}}\nolimits}
-\newcommand{\Argsh}{\mathop{\mathrm{argsh}}\nolimits}\newcommand{\Argch}{\mathop{\mathrm{argch}}\nolimits}
-\newcommand{\Argth}{\mathop{\mathrm{argth}}\nolimits}\newcommand{\pgcd}{\mathop{\mathrm{pgcd}}\nolimits}
+\providecommand{\dd}{\mathrm{d}}
+\providecommand{\ch}{\mathop{\mathrm{ch}}\nolimits}\providecommand{\sh}{\mathop{\mathrm{sh}}\nolimits}
+\renewcommand{\tanh}{\mathop{\mathrm{th}}\nolimits}\providecommand{\cotan}{\mathop{\mathrm{cotan}}\nolimits}
+\providecommand{\Argsh}{\mathop{\mathrm{argsh}}\nolimits}\providecommand{\Argch}{\mathop{\mathrm{argch}}\nolimits}
+\providecommand{\Argth}{\mathop{\mathrm{argth}}\nolimits}\providecommand{\pgcd}{\mathop{\mathrm{pgcd}}\nolimits}
 \providecommand{\llbracket}{[\![}\providecommand{\rrbracket}{]\!]}
-\setlength{\parindent}{0pt}\setlength{\parskip}{3pt}
-% ----- présentation
-\pagestyle{fancy}\fancyhf{}
-\fancyhead[L]{\small\textcolor{col1}{\textbf{Mathématiques -- Supérieur}}}
-\fancyhead[R]{\small\textcolor{col1}{\textbf{@@TITRE@@}}}
-\fancyfoot[L]{\scriptsize Exercices Exo7 (exo7.emath.fr) -- licence Creative Commons BY-NC-SA}
-\fancyfoot[R]{\small \thepage}
-\renewcommand{\headrulewidth}{0.6pt}\renewcommand{\footrulewidth}{0.3pt}
-\fancypagestyle{premiere}{\fancyhead{}\renewcommand{\headrulewidth}{0pt}}
-\newcounter{numexo}
-\newcommand{\Exo}[3]{\par\bigskip\refstepcounter{numexo}\noindent{\color{col1}\large\bfseries Exercice \thenumexo}{\color{col1}#3}\hfill{\scriptsize\color{gray}#1 -- #2}\par\nopagebreak\smallskip}
-\newcommand{\Rubrique}[1]{\par\bigskip\noindent{\color{col1}\rule{\linewidth}{0.8pt}}\par\noindent{\color{col1}\Large\bfseries #1}\par\noindent{\color{col1}\rule{\linewidth}{0.8pt}}\par}
-\newcommand{\Bloc}[2]{\par\medskip\refstepcounter{numexo}\noindent{\color{col1}\bfseries #1 \thenumexo}\hfill{\scriptsize\color{gray}#2}\par\nopagebreak\smallskip}
+\definecolor{col2}{RGB}{248,193,12}
+\fancyfoot[C]{\scriptsize Exercices Exo7 -- CC BY-NC-SA}
+\newcommand{\SourceExo}[1]{\hfill{\normalfont\scriptsize\color{gray}#1}}
 """
 
 
-def construire_tex(ids, titre, sous_titre, corrections, indications):
-    exos = [EXERCICES[i] for i in ids]
-    t = [PREAMBULE.replace("@@TITRE@@", echapper(titre)), r"\begin{document}", r"\thispagestyle{premiere}"]
-    t.append(r"\begin{center}{\color{col1}\LARGE\bfseries " + echapper(titre) + r"}\\[4pt]")
-    if sous_titre:
-        t.append(r"{\large " + echapper(sous_titre) + r"}\\[2pt]")
-    t.append(r"{\color{col2}\rule{6cm}{2pt}}\end{center}")
+MACROS_SUPERIEUR = r"""
+% ----- modèle « Supérieur » : pastilles numérotées, petites capitales, filets fins
+\renewenvironment{exercice}[2][]{%
+    \stepcounter{exocount}\par\vspace{0.55cm}\noindent
+    \tikz[baseline=(n.base)]\node[fill=col1,text=white,font=\sffamily\bfseries\small,minimum size=6mm,inner sep=0pt,rounded corners=1.5pt](n){\arabic{exocount}};%
+    \enspace{\color{col1}\scshape #2}{\color{col1}\small\itshape #1}
+    \par\nopagebreak\vspace{0.15cm}\noindent{\color{col1!35}\rule{\linewidth}{0.4pt}}\par\nopagebreak\vspace{0.1cm}
+}{\par}
+\newcommand{\PastilleCorrige}[2]{\par\vspace{0.5cm}\noindent
+    \tikz[baseline=(n.base)]\node[draw=col1,text=col1,font=\sffamily\bfseries\small,minimum size=6mm,inner sep=0pt,rounded corners=1.5pt,line width=0.8pt](n){#1};%
+    \enspace{\color{col1}\scshape Corrigé -- #2}\par\nopagebreak\vspace{0.1cm}}
+\newcommand{\PastilleIndication}[1]{\par\vspace{0.4cm}\noindent
+    \tikz[baseline=(n.base)]\node[draw=col2,fill=col2!15,text=col1,font=\sffamily\bfseries\small,minimum size=6mm,inner sep=0pt,rounded corners=1.5pt](n){#1};%
+    \enspace{\color{col1}\scshape Indication}\par\nopagebreak\vspace{0.1cm}}
+"""
 
-    def rubrique(cle, nom):
-        t.append(r"\setcounter{numexo}{0}")
-        for e in exos:
-            if not e.get(cle):
-                if cle == "correction":
-                    t.append(r"\Bloc{%s}{Exo7 n\textsuperscript{o}\,%s}" % (nom, e["id"].split("-")[1]))
-                    t.append(r"\textit{Pas de corrigé disponible dans la banque Exo7 pour cet exercice.}")
-                else:
-                    t.append(r"\refstepcounter{numexo}")
-                continue
-            t.append(r"\Bloc{%s}{Exo7 n\textsuperscript{o}\,%s}" % (nom, e["id"].split("-")[1]))
-            t.append(e[cle])
+
+def entete_superieur(titre, classe, etab, date_du_jour, duree, texte_calc, total, exos):
+    """En-tête sobre des feuilles de TD et de colle du supérieur."""
+    infos = []
+    if duree:
+        infos.append("Durée : " + echapper(duree))
+    if texte_calc:
+        infos.append(texte_calc)
+    if total > 0:
+        infos.append("Barème : " + formater_points(total))
+    infos.append(str(len(exos)) + " exercice" + ("s" if len(exos) > 1 else ""))
+    infos.append(date_du_jour)
+    themes = list(dict.fromkeys(e.get("theme", "") for e in exos if e.get("theme")))
+    ligne_themes = ""
+    if themes:
+        ligne_themes = (r"\par\vspace{0.35cm}{\small\color{col1}\textsc{Thèmes} :\enspace}{\small " +
+                        r" \textcolor{col2}{$\bullet$} ".join(echapper(t) for t in themes[:6]) + "}")
+    return r"""
+\thispagestyle{premiere}
+\noindent{\color{col1}\rule{\textwidth}{2pt}}\par\vspace{-0.6mm}
+\noindent{\color{col2}\rule{\textwidth}{0.8pt}}\par\vspace{1.5mm}
+\noindent{\small\color{col1}\scshape """ + echapper(etab) + r"""}\hfill{\small\color{col1}\scshape Année universitaire """ + annee_scolaire().replace("-", "--") + r"""}
+\par\vspace{0.9cm}
+\begin{center}
+{\color{col1}\fontsize{24}{28}\selectfont\scshape """ + echapper(titre) + r"""}\\[3mm]
+""" + (r"{\large\itshape " + echapper(classe) + r"}\\[3mm]" if classe else "") + r"""
+{\color{col2}\rule{3cm}{1.2pt}}\\[2.5mm]
+{\small\color{col1}""" + r"\enspace\textcolor{col2}{$\diamond$}\enspace ".join(infos) + r"""}
+\end{center}
+""" + ligne_themes + r"""
+\par\vspace{0.3cm}\noindent{\color{col1}\rule{\textwidth}{0.6pt}}
+"""
+
+
+def source(e):
+    return r"Exo7 n\textsuperscript{o}\,%s -- %s" % (e["id"].split("-")[1], echapper(e["auteur"]))
+
+
+def titre_exo(e):
+    t = e.get("titre") or echapper(e.get("theme", ""))
+    if e.get("difficulte"):
+        t += r"\enspace$" + r"\star" * e["difficulte"] + "$"
+    return t
+
+
+def construire_tex(ids, titre, classe, corrections, indications, etablissement="", duree="",
+                   calculatrice="", page_presentation=False, style_presentation="moderne",
+                   citation="", auteur_citation="", points=None):
+    """Feuille au format du générateur du lycée : en-tête, Nom/Prénom, page de présentation au choix."""
+    exos = [EXERCICES[i] for i in ids]
+    etab = etablissement.strip() or "Mathématiques -- Supérieur"
+    titre = titre.strip() or "Feuille d'exercices"
+    if corrections == "seuls":
+        titre += " — Corrigé"
+    classe = classe.strip()
+    date_du_jour = datetime.now().strftime("%d/%m/%Y")
+    texte_calc = TEXTES_CALCULATRICE.get((calculatrice or "").strip(), "")
+    pts = {i: float(v) for i, v in (points or {}).items() if i in ids and 0 < float(v) <= 100}
+    total = sum(pts.values())
+
+    code = generer_preambule(titre, etab).replace("\\begin{document}", MACROS_EXO7 + "\n\\begin{document}", 1)
+    if page_presentation and style_presentation == "chapitre":
+        code = code.replace("\\begin{document}", MACROS_CHAPITRE + "\n\\begin{document}", 1)
+    superieur = style_presentation == "superieur" and not page_presentation
+    if superieur:
+        code = code.replace("\\begin{document}", MACROS_SUPERIEUR + "\n\\begin{document}", 1)
+
+    if superieur:
+        code += entete_superieur(titre, classe, etab, date_du_jour, duree.strip(), texte_calc, total, exos)
+    elif page_presentation:
+        fabrique = generer_page_chapitre if style_presentation == "chapitre" else generer_page_presentation
+        page = fabrique(titre, etab, classe, date_du_jour, duree.strip(), total, len(exos),
+                        citation.strip(), auteur_citation.strip(), texte_calc)
+        # adaptations au supérieur : année universitaire, pas de mention « LPO »
+        page = page.replace("Année scolaire", "Année universitaire")
+        page = page.replace(r"{\Large\bfseries\sffamily LPO}", r"{\Large\bfseries\sffamily SUP}")
+        code += page
+    else:
+        ligne_duree = (r"\\[2mm] {\large Durée : " + echapper(duree.strip()) + "}") if duree.strip() else ""
+        if texte_calc:
+            ligne_duree += r"\\[1mm] {\itshape " + texte_calc + "}"
+        code += r"""
+\thispagestyle{premiere}
+\noindent
+\begin{minipage}[t]{0.5\textwidth}
+    \textbf{""" + echapper(etab) + r"""} \\
+    Année universitaire """ + annee_scolaire() + r"""
+\end{minipage}
+\begin{minipage}[t]{0.5\textwidth}
+    \raggedleft
+    \textbf{""" + echapper(classe) + r"""} \\
+    \textbf{Date : } """ + date_du_jour + ((r" \\ \textbf{Barème : } " + formater_points(total)) if total > 0 else "") + r"""
+\end{minipage}
+
+\vspace{0.3cm}
+\noindent{\color{col1}\rule{\textwidth}{0.8pt}}
+\vspace{0.2cm}
+
+\begin{center}
+    {\LARGE \bfseries \color{col1} """ + echapper(titre) + r"""}""" + ligne_duree + r"""
+\end{center}
+
+\vspace{0.1cm}
+\noindent{\color{col1}\rule{\textwidth}{1.5pt}}
+\vspace{0.4cm}
+""" + ("" if corrections == "seuls" else r"""
+\noindent
+\textbf{Nom : }\dotfill\qquad\textbf{Prénom : }\dotfill\mbox{}
+
+\vspace{0.4cm}
+""")
+
+    def titre_partie(texte):
+        return (r"\newpage\begin{center}{\LARGE \bfseries \color{col1} " + texte +
+                r"}\end{center}\noindent{\color{col1}\rule{\textwidth}{1.5pt}}\vspace{0.2cm}" + "\n")
 
     if corrections != "seuls":
-        t.append(r"\setcounter{numexo}{0}")
         for e in exos:
-            entete = ""
-            if e.get("titre"):
-                entete += r" -- \textit{" + e["titre"] + "}"
-            if e.get("difficulte"):
-                entete += r"\quad$" + r"\star" * e["difficulte"] + "$"
-            t.append(r"\Exo{Exo7 n\textsuperscript{o}\,%s}{%s}{%s}" % (e["id"].split("-")[1], echapper(e["auteur"]), entete))
-            t.append(e["enonce"])
-    if indications and any(e.get("indication") for e in exos) and corrections != "seuls":
-        t.append(r"\clearpage\Rubrique{Indications}")
-        rubrique("indication", "Indication pour l'exercice")
+            bareme = ("[ (" + formater_points(pts[e["id"]]) + ")]") if e["id"] in pts else ""
+            code += "\\begin{exercice}" + bareme + "{" + titre_exo(e) + r"\SourceExo{" + source(e) + "}}\n"
+            code += e["enonce"] + "\n\\end{exercice}\n"
+    if indications and corrections != "seuls" and any(e.get("indication") for e in exos):
+        code += titre_partie("Indications")
+        for n, e in enumerate(exos, 1):
+            if e.get("indication") and superieur:
+                code += r"\PastilleIndication{" + str(n) + "}\n" + e["indication"] + "\n\\par\n"
+            elif e.get("indication"):
+                code += (r"\vspace{0.4cm}\noindent{\color{col1}\textbf{Indication pour l'exercice " + str(n) +
+                         r"}}\par\vspace{0.1cm}" + "\n" + e["indication"] + "\n\\par\n")
     if corrections in ("fin", "seuls"):
-        t.append(r"\clearpage\Rubrique{Corrigés}" if corrections == "fin" else r"\Rubrique{Corrigés}")
-        rubrique("correction", "Corrigé de l'exercice")
-    t.append(r"\end{document}")
-    return "\n".join(t) + "\n"
+        if corrections == "fin":
+            code += titre_partie("Corrigés")
+        for n, e in enumerate(exos, 1):
+            if superieur:
+                code += r"\PastilleCorrige{" + str(n) + "}{" + titre_exo(e) + r"\SourceExo{" + source(e) + "}}\n"
+                code += (e.get("correction") or r"\emph{Pas de corrigé disponible dans la banque Exo7 pour cet exercice.}")
+                code += "\n\\par\n"
+                continue
+            code += (r"\vspace{0.4cm}\noindent{\color{col1}\textbf{Corrigé de l'exercice " + str(n) +
+                     r"}} \textbf{-- " + titre_exo(e) + r"\SourceExo{" + source(e) + r"}}\par\vspace{0.1cm}" + "\n")
+            code += (e.get("correction") or r"\emph{Pas de corrigé disponible dans la banque Exo7 pour cet exercice.}")
+            code += "\n\\par\n"
+    code += (r"\par\vfill\begin{center}\scriptsize\color{gray} Exercices tirés de la banque Exo7 "
+             r"(exo7.emath.fr), licence Creative Commons BY-NC-SA.\end{center}" + "\n")
+    return code + FOOTER
 
 
 def compiler(tex):
@@ -143,9 +250,17 @@ def compiler(tex):
 class DemandeUniv(BaseModel):
     exercices: list[str] = Field(min_length=1, max_length=MAX_EXERCICES)
     titre: str | None = Field(default="Feuille d'exercices", max_length=120)
-    sous_titre: str | None = Field(default="", max_length=120)     # ex. « MPSI -- Réduction »
+    sous_titre: str | None = Field(default="", max_length=120)     # classe / filière, ex. « MP -- Réduction »
+    etablissement: str | None = Field(default="", max_length=120)
+    duree: str | None = Field(default="", max_length=40)
+    calculatrice: str | None = Field(default="", max_length=20)     # "", "autorisee" ou "interdite"
+    page_presentation: bool = False
+    style_presentation: str | None = Field(default="moderne", max_length=20)   # "moderne", "chapitre" ou "superieur"
+    citation: str | None = Field(default="", max_length=300)
+    auteur_citation: str | None = Field(default="", max_length=80)
     corrections: str | None = Field(default="sans", max_length=10)  # "sans", "fin" ou "seuls"
     indications: bool = False
+    points: dict[str, float] | None = None   # barème facultatif : {"exo7-001611": 4, ...}
 
 
 @router.get("/chapitres")
@@ -168,8 +283,11 @@ def univ_generer_pdf(demande: DemandeUniv):
     if inconnus:
         raise HTTPException(status_code=400, detail="Exercice inconnu : " + inconnus[0])
     mode = demande.corrections if demande.corrections in ("sans", "fin", "seuls") else "sans"
-    tex = construire_tex(list(dict.fromkeys(demande.exercices)), demande.titre or "Feuille d'exercices",
-                         demande.sous_titre or "", mode, demande.indications)
+    tex = construire_tex(list(dict.fromkeys(demande.exercices)), demande.titre or "", demande.sous_titre or "",
+                         mode, demande.indications, demande.etablissement or "", demande.duree or "",
+                         demande.calculatrice or "", demande.page_presentation,
+                         demande.style_presentation or "moderne", demande.citation or "", demande.auteur_citation or "",
+                         demande.points)
     pdf, dossier = compiler(tex)
     return FileResponse(pdf, media_type="application/pdf", filename="feuille_universitaire.pdf",
                         background=BackgroundTask(shutil.rmtree, dossier, ignore_errors=True))
