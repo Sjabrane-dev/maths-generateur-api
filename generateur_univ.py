@@ -325,3 +325,89 @@ def univ_generer_pdf(demande: DemandeUniv, x_forwarded_for: str | None = Header(
         _verrou.release()
     return FileResponse(pdf, media_type="application/pdf", filename="feuille_universitaire.pdf",
                         background=BackgroundTask(shutil.rmtree, dossier, ignore_errors=True))
+
+
+# ---------------------------------------------------------------------------
+# Planches de colle : une page par étudiant (question de cours + exercices),
+# puis, au choix, la version du colleur avec les corrigés.
+
+class Planche(BaseModel):
+    question: str | None = Field(default="", max_length=400)
+    exercices: list[str] = Field(min_length=1, max_length=4)
+
+
+class DemandeColle(BaseModel):
+    planches: list[Planche] = Field(min_length=1, max_length=4)
+    titre: str | None = Field(default="Colle", max_length=120)
+    sous_titre: str | None = Field(default="", max_length=120)
+    etablissement: str | None = Field(default="", max_length=120)
+    colleur: bool = True          # ajoute la version du colleur (énoncés + corrigés)
+
+
+LETTRES = "ABCD"
+
+
+def construire_colle(planches, titre, classe, etab, colleur):
+    etab = etab.strip() or "Mathématiques -- Supérieur"
+    titre = titre.strip() or "Colle"
+    classe = classe.strip()
+    date_du_jour = datetime.now().strftime("%d/%m/%Y")
+    code = generer_preambule(titre, etab).replace("\\begin{document}", MACROS_EXO7 + MACROS_SUPERIEUR + r"""
+\newcommand{\BoiteCours}[1]{\par\vspace{0.4cm}\noindent\colorbox{col2!18}{\parbox{\dimexpr\linewidth-2\fboxsep\relax}{%
+  \vspace{1.5mm}{\color{col1}\scshape\bfseries Question de cours}\par\vspace{1mm}#1\vspace{1.5mm}}}\par\vspace{0.2cm}}
+\newcommand{\EntetePlanche}[2]{\thispagestyle{premiere}
+  \noindent{\color{col1}\rule{\textwidth}{2pt}}\par\vspace{-0.6mm}\noindent{\color{col2}\rule{\textwidth}{0.8pt}}\par\vspace{1.5mm}
+  \noindent{\small\color{col1}\scshape """ + echapper(etab) + r"""}\hfill{\small\color{col1}\scshape """ + date_du_jour + r"""}\par\vspace{0.6cm}
+  \begin{center}{\color{col1}\fontsize{20}{24}\selectfont\scshape """ + echapper(titre) + r""" -- #1}\\[2mm]
+  """ + ((r"{\large\itshape " + echapper(classe) + r"}\\[2mm]") if classe else "") + r"""
+  {\color{col2}\rule{3cm}{1.2pt}}\\[1mm]{\small\color{col1}#2}\end{center}\vspace{0.2cm}}
+""" + "\n\\begin{document}", 1)
+
+    def page(lettre, p, avec_corriges):
+        exos = [EXERCICES[i] for i in p["exercices"]]
+        sous = "Version du colleur : énoncés et corrigés" if avec_corriges else (
+            "Nom : \\rule{5cm}{0.4pt}")
+        t = r"\EntetePlanche{Planche " + lettre + "}{" + sous + "}\n\\setcounter{exocount}{0}\n"
+        if (p.get("question") or "").strip():
+            t += r"\BoiteCours{" + echapper(p["question"].strip()) + "}\n"
+        for e in exos:
+            t += "\\begin{exercice}{" + titre_exo(e) + r"\SourceExo{" + source(e) + "}}\n" + e["enonce"] + "\n\\end{exercice}\n"
+            if avec_corriges:
+                t += (r"\par\vspace{0.15cm}\noindent{\color{col1}\small\scshape Corrigé}\par\nopagebreak" + "\n" +
+                      (e.get("correction") or r"\emph{Pas de corrigé disponible dans la banque Exo7 pour cet exercice.}") + "\n\\par\n")
+        return t
+
+    for k, p in enumerate(planches):
+        if k:
+            code += "\n\\newpage\n"
+        code += page(LETTRES[k], p, False)
+    if colleur:
+        for p_k, p in enumerate(planches):
+            code += "\n\\newpage\n" + page(LETTRES[p_k], p, True)
+    code += (r"\par\vfill\begin{center}\scriptsize\color{gray} Exercices tirés de la banque Exo7 "
+             r"(exo7.emath.fr), licence Creative Commons BY-NC-SA.\end{center}" + "\n")
+    return code + FOOTER
+
+
+@router.post("/generer-colle")
+def univ_generer_colle(demande: DemandeColle, x_forwarded_for: str | None = Header(default=None)):
+    ip = (x_forwarded_for or "inconnue").split(",")[0].strip()
+    if _trop_de_demandes(ip):
+        raise HTTPException(status_code=429, detail="Trop de documents demandés : patientez une minute.")
+    planches = []
+    for p in demande.planches:
+        ids = list(dict.fromkeys(p.exercices))
+        inconnus = [i for i in ids if i not in EXERCICES]
+        if inconnus:
+            raise HTTPException(status_code=400, detail="Exercice inconnu : " + inconnus[0])
+        planches.append({"question": p.question or "", "exercices": ids})
+    tex = construire_colle(planches, demande.titre or "", demande.sous_titre or "", demande.etablissement or "",
+                           demande.colleur)
+    if not _verrou.acquire(timeout=60):
+        raise HTTPException(status_code=503, detail="Le serveur est occupé : réessayez dans un instant.")
+    try:
+        pdf, dossier = compiler(tex)
+    finally:
+        _verrou.release()
+    return FileResponse(pdf, media_type="application/pdf", filename="planches_colle.pdf",
+                        background=BackgroundTask(shutil.rmtree, dossier, ignore_errors=True))
