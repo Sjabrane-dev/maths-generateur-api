@@ -333,7 +333,7 @@ def univ_generer_pdf(demande: DemandeUniv, x_forwarded_for: str | None = Header(
 
 class Planche(BaseModel):
     question: str | None = Field(default="", max_length=400)
-    exercices: list[str] = Field(min_length=1, max_length=4)
+    exercices: list[str]          # 1 à 4 exercices (vérifié dans la route : pydantic 1 et 2)
 
 
 class DemandeColle(BaseModel):
