@@ -19,6 +19,7 @@ import threading
 import time
 
 from fastapi import APIRouter, Header, HTTPException
+from acces import exiger_acces
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from starlette.background import BackgroundTask
@@ -304,7 +305,9 @@ def univ_exercices(chapitre: str):
 
 
 @router.post("/generer-pdf")
-def univ_generer_pdf(demande: DemandeUniv, x_forwarded_for: str | None = Header(default=None)):
+def univ_generer_pdf(demande: DemandeUniv, x_forwarded_for: str | None = Header(default=None),
+        x_mot_de_passe: str | None = Header(default=None)):
+    exiger_acces(x_mot_de_passe, x_forwarded_for)
     ip = (x_forwarded_for or "inconnue").split(",")[0].strip()
     if _trop_de_demandes(ip):
         raise HTTPException(status_code=429, detail="Trop de feuilles demandées : patientez une minute.")
@@ -390,7 +393,9 @@ def construire_colle(planches, titre, classe, etab, colleur):
 
 
 @router.post("/generer-colle")
-def univ_generer_colle(demande: DemandeColle, x_forwarded_for: str | None = Header(default=None)):
+def univ_generer_colle(demande: DemandeColle, x_forwarded_for: str | None = Header(default=None),
+        x_mot_de_passe: str | None = Header(default=None)):
+    exiger_acces(x_mot_de_passe, x_forwarded_for)
     ip = (x_forwarded_for or "inconnue").split(",")[0].strip()
     if _trop_de_demandes(ip):
         raise HTTPException(status_code=429, detail="Trop de documents demandés : patientez une minute.")

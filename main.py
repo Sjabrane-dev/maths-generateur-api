@@ -4,7 +4,7 @@ import shutil
 import sqlite3
 from contextlib import closing
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
@@ -15,6 +15,8 @@ from config import CHEMIN_BASE
 from editeur_latex import router as routeur_editeur
 from entrainement import router as routeur_entrainement
 from generateur_univ import router as routeur_univ
+from acces import acces_ok, exiger_acces
+from typing import Optional
 
 app = FastAPI()
 
@@ -62,7 +64,8 @@ def accueil():
 # Fonctions « def » (et non « async def ») : FastAPI les exécute dans un fil
 # séparé, donc une compilation LaTeX ne bloque plus tout le serveur.
 @app.get("/exercices")
-def liste_exercices():
+def liste_exercices(x_mot_de_passe: Optional[str] = Header(default=None)):
+    avec_corriges = acces_ok(x_mot_de_passe)     # corrigés réservés au professeur
     with closing(sqlite3.connect(CHEMIN_BASE)) as conn:
         resultats = conn.execute("""
             SELECT id, titre, niveau, chapitre, difficulte, enonce, correction
@@ -73,7 +76,7 @@ def liste_exercices():
     return [
         {
             "id": l[0], "titre": l[1], "niveau": l[2], "chapitre": l[3],
-            "difficulte": l[4], "enonce": l[5], "correction": l[6]
+            "difficulte": l[4], "enonce": l[5], "correction": l[6] if avec_corriges else None
         }
         for l in resultats
     ]
@@ -89,7 +92,10 @@ def liste_chapitres(niveau: str):
 
 
 @app.post("/generer-pdf")
-def api_generer_pdf(demande: DemandeFiche):
+def api_generer_pdf(demande: DemandeFiche,
+                    x_mot_de_passe: Optional[str] = Header(default=None),
+                    x_forwarded_for: Optional[str] = Header(default=None)):
+    exiger_acces(x_mot_de_passe, x_forwarded_for)
     try:
         chemin_pdf, dossier = assembler_et_compiler(
             liste_choix=demande.exercices,
@@ -119,6 +125,13 @@ def api_generer_pdf(demande: DemandeFiche):
         filename="votre_fiche.pdf",
         background=BackgroundTask(shutil.rmtree, dossier, ignore_errors=True),
     )
+
+
+@app.post("/verifier-acces-generateur")
+def verifier_acces_generateur(x_mot_de_passe: Optional[str] = Header(default=None),
+                              x_forwarded_for: Optional[str] = Header(default=None)):
+    exiger_acces(x_mot_de_passe or "", x_forwarded_for)
+    return {"ok": True}
 
 
 if __name__ == "__main__":
